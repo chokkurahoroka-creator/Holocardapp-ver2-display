@@ -182,3 +182,41 @@
     border-right-color: var(--border);
   }
 }
+.maintenanceBanner {
+  position: fixed;
+  left: 0;
+  right: 0;
+  overflow: hidden;
+  background: #7a1e1e;
+  color: #fff;
+  font-size: 13px;
+  font-weight: bold;
+  white-space: nowrap;
+  z-index: 2000;
+  padding: 4px 0;
+  pointer-events: none;
+}
+.maintenanceBanner.top {
+  top: 0;
+}
+.maintenanceBanner.bottom {
+  bottom: 0;
+}
+.maintenanceBannerTrack {
+  display: inline-flex;
+  animation: maintenanceScroll 20s linear infinite;
+}
+.maintenanceBannerItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 16px;
+}
+@keyframes maintenanceScroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
