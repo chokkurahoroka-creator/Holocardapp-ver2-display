@@ -1,23 +1,45 @@
 import { Link, useLocation } from 'react-router-dom'
 
+const LINKS = [
+  { to: '/', code: '01', label: 'カード一覧' },
+  { to: '/cardpool', code: '02', label: 'カードプール・デッキ' },
+]
+
 export function SiteNav() {
   const location = useLocation()
 
-  const linkClass = (path: string) =>
-    `text-sm rounded px-3 py-1.5 ${
-      location.pathname === path
-        ? 'bg-[#d4af6a] text-[#1a1305] font-bold'
-        : 'text-[#9aa5c0] border border-[#d4af6a]/30'
-    }`
-
   return (
-    <nav className="flex gap-2 mb-4">
-      <Link to="/" className={linkClass('/')}>
-        カード一覧
-      </Link>
-      <Link to="/cardpool" className={linkClass('/cardpool')}>
-        カードプール・デッキ
-      </Link>
-    </nav>
+    <header
+      className="hud-panel"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: 12,
+        padding: '10px 16px',
+        marginBottom: 20,
+      }}
+    >
+      <div>
+        <div className="hud-font" style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>
+          ホロカ
+        </div>
+        <div className="hud-mono" style={{ fontSize: 10, color: 'var(--hud-cyan)' }}>
+          SYSTEM://CARDS
+        </div>
+      </div>
+
+      <nav style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {LINKS.map((l) => (
+          <Link key={l.to} to={l.to} className={`hud-nav-item hud-font${location.pathname === l.to ? ' active' : ''}`}>
+            <span className="hud-mono" style={{ fontSize: 10, opacity: 0.6 }}>
+              {l.code}
+            </span>
+            {l.label}
+          </Link>
+        ))}
+      </nav>
+    </header>
   )
 }

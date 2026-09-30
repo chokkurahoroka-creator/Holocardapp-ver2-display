@@ -1,9 +1,12 @@
+import type { CSSProperties } from 'react'
 import type { Card } from '../types/card'
 import { RelatedCards } from './RelatedCards'
 import { useRelatedCards } from '../hooks/useRelatedCards'
 import { RatingRadar } from './RatingRadar'
+import { ArtsSkillsView } from './ArtsSkillsView'
 import { downloadCardImage } from '../lib/download'
 import { logEvent } from '../lib/logEvent'
+import { getRarityConfig, renderRarityFrame } from '../utils/rarityFrame'
 
 type Props = {
   card: Card | null
@@ -14,6 +17,23 @@ type Props = {
   onSelectCard: (card: Card) => void
 }
 
+const navButtonStyle: CSSProperties = {
+  position: 'absolute',
+  top: '50%',
+  transform: 'translateY(-50%)',
+  fontSize: 26,
+  lineHeight: 1,
+  background: 'rgba(6,18,23,0.75)',
+  border: '1px solid var(--hud-line)',
+  color: 'var(--hud-ink)',
+  cursor: 'pointer',
+  borderRadius: '50%',
+  width: 40,
+  height: 40,
+  zIndex: 10,
+  padding: 0,
+}
+
 export function CardModal({ card, onClose, onPrev, onNext, hasNav, onSelectCard }: Props) {
   const { related, loading } = useRelatedCards(card)
   if (!card) return null
@@ -22,6 +42,8 @@ export function CardModal({ card, onClose, onPrev, onNext, hasNav, onSelectCard 
     await downloadCardImage(card)
     logEvent('download', { set_code: card.set_code, type: card.type, slot: card.slot, card_name: card.card_name })
   }
+
+  const rarityColor = getRarityConfig(card.rarity).badgeColor
 
   return (
     <div
@@ -36,133 +58,94 @@ export function CardModal({ card, onClose, onPrev, onNext, hasNav, onSelectCard 
         alignItems: 'center',
         justifyContent: 'center',
         zIndex: 1000,
+        padding: 16,
       }}
     >
+      {/* 外枠：角カットのHUDパネル（ここはスクロールさせない） */}
       <div
+        className="hud-panel"
         style={{
-          background: '#1a1305',
-          borderRadius: 12,
-          padding: 20,
-          maxWidth: 700,
-          width: '90%',
-          maxHeight: '90vh',
-          overflowY: 'auto',
+          width: 'min(94vw, 1000px)',
+          maxHeight: '92vh',
           display: 'flex',
-          gap: 20,
-          position: 'relative',
+          flexDirection: 'column',
+          color: 'var(--hud-ink)',
         }}
       >
         <button
           onClick={onClose}
-          style={{ position: 'absolute', top: 10, right: 10, fontSize: 20, background: 'none', border: 'none', color: '#fff', cursor: 'pointer' }}
+          className="btn-icon"
+          style={{ position: 'absolute', top: 6, right: 14, fontSize: 22, zIndex: 11 }}
+          aria-label="閉じる"
         >
           ×
         </button>
 
         {hasNav && (
           <>
-            <button
-              onClick={onPrev}
-              style={{
-                position: 'absolute',
-                left: 8,
-                top: '50%',
-                transform: 'translateY(-50%)',
-                fontSize: 28,
-                background: 'rgba(0,0,0,0.5)',
-                border: 'none',
-                color: '#fff',
-                cursor: 'pointer',
-                borderRadius: '50%',
-                width: 40,
-                height: 40,
-                zIndex: 10,
-              }}
-            >
+            <button onClick={onPrev} style={{ ...navButtonStyle, left: 8 }} aria-label="前のカード">
               ‹
             </button>
-            <button
-              onClick={onNext}
-              style={{
-                position: 'absolute',
-                right: 8,
-                top: '50%',
-                transform: 'translateY(-50%)',
-                fontSize: 28,
-                background: 'rgba(0,0,0,0.5)',
-                border: 'none',
-                color: '#fff',
-                cursor: 'pointer',
-                borderRadius: '50%',
-                width: 40,
-                height: 40,
-                zIndex: 10,
-              }}
-            >
+            <button onClick={onNext} style={{ ...navButtonStyle, right: 8 }} aria-label="次のカード">
               ›
             </button>
           </>
         )}
 
-        <div style={{ flexShrink: 0 }}>
-          <img
-            src={card.image_url ?? ''}
-            alt={card.card_name}
-            style={{ width: 240, aspectRatio: '5/7', objectFit: 'cover', borderRadius: 8 }}
-          />
-          <button
-            onClick={handleDownload}
-            style={{
-              marginTop: 8,
-              width: '100%',
-              background: '#d4af6a',
-              color: '#1a1305',
-              border: 'none',
-              borderRadius: 6,
-              padding: '8px 0',
-              fontWeight: 'bold',
-              fontSize: 13,
-              cursor: 'pointer',
-            }}
-          >
-            ⬇ ダウンロード
-          </button>
-        </div>
-
-        <div style={{ color: '#fff' }}>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-            {card.type && <span style={badgeStyle('#7a5c1e')}>{card.type}</span>}
-            {card.rarity && <span style={badgeStyle('#7ec8e3')}>{card.rarity}</span>}
-            {card.card_type && <span style={badgeStyle('#a3a3a3')}>{card.card_type}</span>}
-            {card.stage && <span style={badgeStyle('#9d7cf2')}>{card.stage}</span>}
-          </div>
-          <h3 style={{ margin: '0 0 10px' }}>{card.card_name}</h3>
-          {card.attribute && <div>属性: {card.attribute}</div>}
-          {card.hp && <div>HP: {card.hp}</div>}
-          {card.baton_touch_cost !== null && <div>バトンタッチ: {card.baton_touch_cost}</div>}
-
-          <div style={{ marginTop: 16, display: 'flex', justifyContent: 'center' }}>
-            <RatingRadar card={card} />
-          </div>
-          {card.rating_comment && (
-            <div style={{ marginTop: 10, fontSize: 13, color: '#c9d1e0', lineHeight: 1.5 }}>
-              {card.rating_comment}
+        {/* 中身：実際にスクロールする領域 */}
+        <div style={{ overflowY: 'auto', padding: '28px 56px 24px' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24 }}>
+            <div style={{ flexShrink: 0, width: 240, maxWidth: '100%' }} className="group">
+              {card.image_url && renderRarityFrame(card.image_url, card.card_name, card.rarity)}
+              <button onClick={handleDownload} className="btn-primary" style={{ marginTop: 10, width: '100%' }}>
+                ⬇ ダウンロード
+              </button>
             </div>
-          )}
+
+            <div style={{ flex: '1 1 260px', minWidth: 0 }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                {card.type && <span style={badgeStyle('#ffd76a')}>{card.type}</span>}
+                {card.rarity && <span style={badgeStyle(rarityColor)}>{card.rarity}</span>}
+                {card.card_type && <span style={badgeStyle('#9fc3ca')}>{card.card_type}</span>}
+                {card.stage && <span style={badgeStyle('#b28ce3')}>{card.stage}</span>}
+              </div>
+              <h3 className="hud-font" style={{ margin: '0 0 10px', fontSize: 20, color: '#fff' }}>
+                {card.card_name}
+              </h3>
+              <div className="hud-mono" style={{ fontSize: 13, lineHeight: 1.8, color: 'var(--hud-ink-dim)' }}>
+                {card.attribute && <div>属性: <span style={{ color: 'var(--hud-ink)' }}>{card.attribute}</span></div>}
+                {card.hp && <div>HP: <span style={{ color: 'var(--hud-ink)' }}>{card.hp}</span></div>}
+                {card.baton_touch_cost !== null && (
+                  <div>バトンタッチ: <span style={{ color: 'var(--hud-ink)' }}>{card.baton_touch_cost}</span></div>
+                )}
+              </div>
+
+              <ArtsSkillsView card={card} />
+
+              <div style={{ marginTop: 16, display: 'flex', justifyContent: 'center' }}>
+                <RatingRadar card={card} />
+              </div>
+              {card.rating_comment && (
+                <div style={{ marginTop: 10, fontSize: 13, color: 'var(--hud-ink)', lineHeight: 1.6 }}>{card.rating_comment}</div>
+              )}
+            </div>
+          </div>
+
+          <RelatedCards related={related} loading={loading} onSelect={onSelectCard} />
         </div>
-        <RelatedCards related={related} loading={loading} onSelect={onSelectCard} />
       </div>
     </div>
   )
 }
 
-function badgeStyle(bg: string): React.CSSProperties {
+function badgeStyle(color: string): CSSProperties {
   return {
-    background: bg,
-    color: '#1a1305',
+    fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
+    color,
+    border: `1px solid ${color}`,
     fontSize: 11,
-    padding: '3px 8px',
+    padding: '2px 8px',
     borderRadius: 4,
-    fontWeight: 'bold',
+    fontWeight: 600,
   }
 }

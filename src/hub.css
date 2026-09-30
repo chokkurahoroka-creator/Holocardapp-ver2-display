@@ -1,0 +1,218 @@
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+/* horoka-display 用 HUDテーマ。既存の index.css（メンテナンスバナー等）の後に読み込む */
+
+:root {
+  color-scheme: dark;
+  --hud-void: #061217;
+  --hud-panel: #0b1e26;
+  --hud-line: #143844;
+  --hud-cyan: #4ce0e6;
+  --hud-coral: #ff8a5c;
+  --hud-ink: #d8f3f2;
+  --hud-ink-dim: #9fc3ca;
+}
+
+body {
+  display: block;
+  margin: 0;
+  min-height: 100vh;
+  background-color: var(--hud-void);
+  color: var(--hud-ink);
+  font-family: 'Inter', system-ui, sans-serif;
+  background-image:
+    linear-gradient(rgba(76, 224, 230, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(76, 224, 230, 0.035) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+#root {
+  max-width: none;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.hud-font {
+  font-family: 'Rajdhani', 'Inter', system-ui, sans-serif;
+  letter-spacing: 0.02em;
+}
+.hud-mono {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+/* ===== 角を斜めにカットしたHUDパネル（左上・右下カット、残り2角にL字の縁取り） ===== */
+.hud-panel {
+  position: relative;
+  background: var(--hud-panel);
+  border: 1px solid var(--hud-line);
+  clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+}
+.hud-panel::before,
+.hud-panel::after {
+  content: '';
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  pointer-events: none;
+}
+.hud-panel::before {
+  top: 0;
+  right: 0;
+  border-top: 1px solid var(--hud-cyan);
+  border-right: 1px solid var(--hud-cyan);
+}
+.hud-panel::after {
+  bottom: 0;
+  left: 0;
+  border-bottom: 1px solid var(--hud-cyan);
+  border-left: 1px solid var(--hud-cyan);
+}
+
+/* ===== 入力系 ===== */
+.field {
+  box-sizing: border-box;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 14px;
+  background: rgba(76, 224, 230, 0.04);
+  border: 1px solid var(--hud-line);
+  color: var(--hud-ink);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.field:focus {
+  outline: none;
+  border-color: var(--hud-cyan);
+  box-shadow: 0 0 0 1px rgba(76, 224, 230, 0.4), 0 0 8px rgba(76, 224, 230, 0.25);
+}
+.field::placeholder {
+  color: #6f97a0;
+}
+.field:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+select.field option {
+  background: #0b1e26;
+  color: var(--hud-ink);
+}
+
+/* ===== ボタン ===== */
+.btn-primary,
+.btn-secondary,
+.btn-danger,
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 14px;
+  font-family: 'Rajdhani', 'Inter', system-ui, sans-serif;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+.btn-primary:disabled,
+.btn-secondary:disabled,
+.btn-danger:disabled,
+.btn-icon:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.btn-primary {
+  background: var(--hud-cyan);
+  border: 1px solid var(--hud-cyan);
+  color: #04232a;
+  font-weight: 700;
+}
+.btn-primary:hover:not(:disabled) {
+  background: #6de8ed;
+}
+.btn-secondary {
+  background: transparent;
+  border: 1px solid var(--hud-line);
+  color: var(--hud-ink-dim);
+  font-weight: 500;
+}
+.btn-secondary:hover:not(:disabled) {
+  border-color: var(--hud-cyan);
+  color: var(--hud-ink);
+}
+.btn-danger {
+  background: transparent;
+  border: 1px solid rgba(255, 138, 92, 0.4);
+  color: var(--hud-coral);
+}
+.btn-danger:hover:not(:disabled) {
+  background: rgba(255, 138, 92, 0.1);
+}
+.btn-icon {
+  background: transparent;
+  border: none;
+  padding: 6px 8px;
+  color: var(--hud-ink-dim);
+}
+.btn-icon:hover:not(:disabled) {
+  color: var(--hud-cyan);
+}
+
+/* ===== ナビ項目（ホバー強調） ===== */
+.hud-nav-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 14px;
+  text-decoration: none;
+  color: var(--hud-ink-dim);
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, background-color 0.15s;
+}
+.hud-nav-item:hover {
+  color: var(--hud-ink);
+  background: rgba(76, 224, 230, 0.06);
+}
+.hud-nav-item.active {
+  color: var(--hud-cyan);
+  background: rgba(76, 224, 230, 0.12);
+  border-bottom: 2px solid var(--hud-cyan);
+}
+
+/* ===== カードタイル ===== */
+.hud-tile {
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+  border-radius: 8px;
+  background: var(--hud-panel);
+  border: 1px solid var(--hud-line);
+  transition: border-color 0.15s, transform 0.15s;
+}
+.hud-tile:hover {
+  border-color: rgba(76, 224, 230, 0.5);
+  transform: translateY(-2px);
+}
+.hud-tile.selected {
+  border: 2px solid var(--hud-cyan);
+}
+
+/* ===== レア度演出（カード一覧・詳細のサムネイル枠） ===== */
+@keyframes hud-holo-shift {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+@keyframes hud-glow-pulse-color {
+  0%, 100% { box-shadow: 0 0 8px var(--pulse-color, rgba(255, 255, 255, 0.3)); }
+  50% { box-shadow: 0 0 18px var(--pulse-color-strong, rgba(255, 255, 255, 0.7)); }
+}
+@keyframes hud-shine-sweep-hover {
+  0% { transform: translateX(-160%) rotate(-22deg); }
+  100% { transform: translateX(220%) rotate(-22deg); }
+}
+.group:hover .hud-sweep {
+  animation: hud-shine-sweep-hover 1s ease-in-out infinite;
+}

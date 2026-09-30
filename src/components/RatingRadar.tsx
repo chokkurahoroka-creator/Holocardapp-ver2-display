@@ -39,7 +39,7 @@ export function RatingRadar({ card }: Props) {
   return (
     <svg viewBox={`0 0 ${SIZE} ${SIZE}`} width={220} height={220}>
       {gridPolygons.map((pts, i) => (
-        <polygon key={i} points={pts} fill="none" stroke="rgba(212,175,106,0.18)" strokeWidth={1} />
+        <polygon key={i} points={pts} fill="none" stroke="rgba(76,224,230,0.2)" strokeWidth={1} />
       ))}
 
       {items.map((it, i) => {
@@ -51,13 +51,13 @@ export function RatingRadar({ card }: Props) {
             y1={CENTER}
             x2={x2}
             y2={y2}
-            stroke="rgba(212,175,106,0.22)"
+            stroke="rgba(76,224,230,0.25)"
             strokeWidth={1}
           />
         )
       })}
 
-      <polygon points={dataPoints} fill="rgba(212,175,106,0.35)" stroke="#d4af6a" strokeWidth={2} />
+      <polygon points={dataPoints} fill="rgba(76,224,230,0.3)" stroke="#4ce0e6" strokeWidth={2} />
 
       {items.map((it, i) => {
         const [lx, ly] = pointAt(1.28, i, angleStep)
@@ -65,7 +65,7 @@ export function RatingRadar({ card }: Props) {
         const lineHeight = 12
         const startDy = -((lines.length - 1) * lineHeight) / 2 + 4
         return (
-          <text key={`label-${it.key}`} x={lx} y={ly} fontSize={11} fill="#c9d1e0" textAnchor="middle">
+          <text key={`label-${it.key}`} x={lx} y={ly} fontSize={11} fill="#d8f3f2" textAnchor="middle">
             {lines.map((line, li) => (
               <tspan key={li} x={lx} dy={li === 0 ? startDy : lineHeight}>
                 {line}

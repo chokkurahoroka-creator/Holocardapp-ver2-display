@@ -12,9 +12,12 @@ export function RelatedCards({ related, loading, onSelect }: Props) {
   if (!related.length && !loading) return null
 
   return (
-    <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid rgba(212,175,106,0.2)' }}>
-      <div style={{ fontSize: 13, color: '#9aa5c0', marginBottom: 8 }}>
-        関連カード{loading ? '（読み込み中...）' : ''}
+    <div style={{ marginTop: 20, paddingTop: 14, borderTop: '1px solid var(--hud-line)' }}>
+      <div className="hud-mono" style={{ fontSize: 12, color: 'var(--hud-cyan)', marginBottom: 8 }}>
+        RELATED{loading ? ' … LOADING' : ''}
+        <span className="hud-font" style={{ marginLeft: 8, color: 'var(--hud-ink-dim)', fontSize: 13 }}>
+          関連カード
+        </span>
       </div>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         {related.map((r) => (
@@ -30,10 +33,12 @@ export function RelatedCards({ related, loading, onSelect }: Props) {
                 aspectRatio: '5/7',
                 objectFit: 'cover',
                 borderRadius: 6,
-                border: '1px solid rgba(212,175,106,0.3)',
+                border: '1px solid var(--hud-line)',
               }}
             />
-            <div style={{ fontSize: 11, color: '#d4af6a', marginTop: 4 }}>{r.label}</div>
+            <div className="hud-mono" style={{ fontSize: 10, color: 'var(--hud-cyan)', marginTop: 4 }}>
+              {r.label}
+            </div>
           </div>
         ))}
       </div>
