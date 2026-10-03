@@ -10,7 +10,7 @@ type ArtRow = {
   specialAttackDamage?: string
   effectText?: string
 }
-type SkillRow = { skillType?: string; title?: string; text?: string }
+type SkillRow = { skillType?: string; title?: string; text?: string; powerCost?: string }
 
 // エール色 → 表示色
 const YELL_COLOR_MAP: Record<string, string> = {
@@ -94,6 +94,15 @@ export function ArtsSkillsView({ card }: Props) {
                     style={{ fontSize: 10, color: '#64b5f6', border: '1px solid rgba(100,181,246,0.6)', borderRadius: 4, padding: '1px 6px' }}
                   >
                     {s.skillType}
+                  </span>
+                )}
+                {s.powerCost && (
+                  <span
+                    className="hud-mono"
+                    title="ホロパワーコスト"
+                    style={{ fontSize: 10, color: '#ffd76a', border: '1px solid rgba(255,215,106,0.6)', borderRadius: 4, padding: '1px 6px' }}
+                  >
+                    ホロパワー -{s.powerCost}
                   </span>
                 )}
                 {s.title && (
