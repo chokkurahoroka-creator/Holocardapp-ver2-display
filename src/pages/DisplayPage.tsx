@@ -5,6 +5,9 @@ import { useCardSearch } from '../hooks/useCardSearch'
 import { useSiteStatus } from '../hooks/useSiteStatus'
 import { sortCards, type SortKey, type SortDir } from '../utils/sortCards'
 import { CardGrid } from '../components/CardGrid'
+import { SlotGrid } from '../components/SlotGrid'
+import { CardFilterPanel } from '../components/CardFilterPanel'
+import { applyCardFilters, hasActiveFilters, EMPTY_FILTERS, type CardFilters } from '../utils/cardFilters'
 import { CardModal } from '../components/CardModal'
 import { MaintenanceBanner } from '../components/MaintenanceBanner'
 import type { Card } from '../types/card'
@@ -16,6 +19,12 @@ import { SiteNav } from '../components/SiteNav'
 const THIS_PAGE_KEY = 'display'
 const STORAGE_KEY = 'horoka-display:display:setCode'
 
+// 新規・再録・パラレルの順で、それぞれの枠を分けてグループ化する（枠内の並び順はsortedの順序のまま維持）
+const TYPE_ORDER: Card['type'][] = ['新規', '再録', 'パラレル']
+function groupCardsByType(cards: Card[]): { type: Card['type']; cards: Card[] }[] {
+  return TYPE_ORDER.map((type) => ({ type, cards: cards.filter((c) => c.type === type) })).filter((g) => g.cards.length > 0)
+}
+
 export function DisplayPage() {
   const { sets } = useSets()
   const [setCode, setSetCode] = useState<string | null>(() => localStorage.getItem(STORAGE_KEY))
@@ -26,9 +35,36 @@ export function DisplayPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('slot')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
+  const [filters, setFilters] = useState<CardFilters>(EMPTY_FILTERS)
 
-  const searched = useCardSearch(cards, searchQuery)
+  // 弾を切り替えたら、別の弾の選択肢が残らないようフィルターをリセットする
+  useEffect(() => {
+    setFilters(EMPTY_FILTERS)
+  }, [setCode])
+
+  const filteredByPanel = applyCardFilters(cards, filters)
+  const searched = useCardSearch(filteredByPanel, searchQuery)
   const sorted = sortCards(searched, sortKey, sortDir)
+  const groupedByType = groupCardsByType(sorted)
+
+  // パック選択リストは、管理画面で「公開中」に設定されている弾だけを、名前順で表示する
+  const visibleSets = sets
+    .filter((s) => s.status === '公開中')
+    .slice()
+    .sort((a, b) => a.set_name.localeCompare(b.set_name, 'ja'))
+
+  // 通し番号（overall_number）の割り振り方は登録時と同じ: 新規=1〜、再録=新規の続き、パラレル=再録の続き
+  const setInfo = sets.find((s) => s.set_code === setCode)
+  // 検索中や、枠番号順以外の並び替えをしているときは「空いている枠」の概念がそのままでは意味を持たないため、
+  // 検索なし・枠番号順のときだけ空き枠を表示する
+  const showEmptySlots = !searchQuery.trim() && !hasActiveFilters(filters) && sortKey === 'slot' && !!setInfo
+  const slotTypeConfig = setInfo
+    ? [
+        { type: '新規' as const, start: 1, count: setInfo.total_new ?? 0 },
+        { type: '再録' as const, start: (setInfo.total_new ?? 0) + 1, count: setInfo.total_rerun ?? 0 },
+        { type: 'パラレル' as const, start: (setInfo.total_new ?? 0) + (setInfo.total_rerun ?? 0) + 1, count: setInfo.total_parallel ?? 0 },
+      ]
+    : []
 
   const [navIndex, setNavIndex] = useState(-1)
 
@@ -131,7 +167,7 @@ export function DisplayPage() {
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
             <select className="field hud-mono" value={setCode ?? ''} onChange={(e) => setSetCode(e.target.value || null)}>
               <option value="">弾を選択してください</option>
-              {sets.map((s) => (
+              {visibleSets.map((s) => (
                 <option key={s.set_code} value={s.set_code}>
                   {s.set_code}（{s.set_name}）
                 </option>
@@ -141,7 +177,7 @@ export function DisplayPage() {
             <input
               className="field"
               type="text"
-              placeholder="カード名で検索"
+              placeholder="カード名・タグ・キーワードで検索"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               style={{ flex: '1 1 200px', minWidth: 160 }}
@@ -190,6 +226,11 @@ export function DisplayPage() {
               </button>
             )}
           </div>
+
+          {/* 絞り込みフィルター */}
+          <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--hud-line)' }}>
+            <CardFilterPanel cards={cards} filters={filters} onChange={setFilters} />
+          </div>
         </section>
 
         {/* 件数・読み込み状態 */}
@@ -197,15 +238,77 @@ export function DisplayPage() {
           {loading ? 'LOADING...' : `${sorted.length} ITEMS`}
         </div>
 
-        <CardGrid
-          cards={sorted}
-          onCardClick={handleCardClick}
-          isFav={(c) => isFav(c, activeGroup)}
-          onToggleFav={handleToggleFav}
-          selectionMode={selectionMode}
-          selectedIds={selectedIds}
-          onToggleSelect={handleToggleSelect}
-        />
+        {/* 新規・再録・パラレルをそれぞれ別のセクションとして表示する。
+            検索なし・枠番号順のときは、未登録の枠も「空き枠」としてその番号を表示する */}
+        {showEmptySlots
+          ? slotTypeConfig
+              .filter((tc) => tc.count > 0 || cards.some((c) => c.type === tc.type))
+              .map((tc) => {
+                const typeCards = cards.filter((c) => c.type === tc.type)
+                return (
+                  <div key={tc.type} style={{ marginBottom: 28 }}>
+                    <h3
+                      className="hud-font"
+                      style={{
+                        fontSize: 14,
+                        fontWeight: 700,
+                        color: 'var(--hud-cyan)',
+                        borderLeft: '2px solid var(--hud-cyan)',
+                        paddingLeft: 8,
+                        marginBottom: 10,
+                        letterSpacing: '0.03em',
+                      }}
+                    >
+                      {tc.type}
+                      <span className="hud-mono" style={{ marginLeft: 8, fontSize: 11, color: 'var(--hud-ink-dim)', fontWeight: 400 }}>
+                        {typeCards.length}
+                        {tc.count > 0 ? ` / ${tc.count}` : ''} ITEMS
+                      </span>
+                    </h3>
+                    <SlotGrid
+                      cards={typeCards}
+                      startNumber={tc.start}
+                      count={tc.count}
+                      onCardClick={handleCardClick}
+                      isFav={(c) => isFav(c, activeGroup)}
+                      onToggleFav={handleToggleFav}
+                      selectionMode={selectionMode}
+                      selectedIds={selectedIds}
+                      onToggleSelect={handleToggleSelect}
+                    />
+                  </div>
+                )
+              })
+          : groupedByType.map((group) => (
+              <div key={group.type} style={{ marginBottom: 28 }}>
+                <h3
+                  className="hud-font"
+                  style={{
+                    fontSize: 14,
+                    fontWeight: 700,
+                    color: 'var(--hud-cyan)',
+                    borderLeft: '2px solid var(--hud-cyan)',
+                    paddingLeft: 8,
+                    marginBottom: 10,
+                    letterSpacing: '0.03em',
+                  }}
+                >
+                  {group.type}
+                  <span className="hud-mono" style={{ marginLeft: 8, fontSize: 11, color: 'var(--hud-ink-dim)', fontWeight: 400 }}>
+                    {group.cards.length} ITEMS
+                  </span>
+                </h3>
+                <CardGrid
+                  cards={group.cards}
+                  onCardClick={handleCardClick}
+                  isFav={(c) => isFav(c, activeGroup)}
+                  onToggleFav={handleToggleFav}
+                  selectionMode={selectionMode}
+                  selectedIds={selectedIds}
+                  onToggleSelect={handleToggleSelect}
+                />
+              </div>
+            ))}
 
         <CardModal
           card={currentCard}

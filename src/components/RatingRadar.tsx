@@ -23,6 +23,13 @@ export function RatingRadar({ card }: Props) {
   if (!items.length) return null
 
   const rating = card.rating_json || {}
+  // 評価が1つも入力されていない場合は、全て0のレーダーチャートを表示する意味が無いので非表示にする
+  const hasAnyRating = items.some((it) => {
+    const v = rating[it.key]
+    return v !== undefined && v !== null && v !== ('' as unknown) && Number(v) !== 0
+  })
+  if (!hasAnyRating) return null
+
   const angleStep = (Math.PI * 2) / items.length
 
   const gridPolygons = [0.25, 0.5, 0.75, 1].map((frac) =>
