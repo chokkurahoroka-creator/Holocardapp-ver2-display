@@ -3,17 +3,19 @@ import { useSiteStatus } from '../hooks/useSiteStatus'
 
 const YOUTUBE_URL = 'https://www.youtube.com/channel/UClxMlIDTNlNv4H3QsWWgZbw'
 
-// page_keyはuseSiteStatusのDEFAULT_STATUS（display/cardpool）と合わせる
+// page_keyはuseSiteStatusのDEFAULT_STATUS（display/cardpool）と合わせる。
+// 全カード検索（/search）は対応するpage_keyが無いため、site_statusによる非公開設定の対象外（常に表示）
 const LINKS = [
   { to: '/', code: '01', label: '新カード一覧', pageKey: 'display' },
-  { to: '/cardpool', code: '02', label: 'カードプール・デッキ', pageKey: 'cardpool' },
+  { to: '/search', code: '02', label: '全カード検索', pageKey: null as string | null },
+  { to: '/cardpool', code: '03', label: 'カードプール・デッキ', pageKey: 'cardpool' },
 ]
 
 export function SiteNav() {
   const location = useLocation()
   const { status } = useSiteStatus()
   // 非公開に設定されているページはナビから隠す（作業中は従来通り表示したままにする）
-  const visibleLinks = LINKS.filter((l) => status[l.pageKey] !== '非公開')
+  const visibleLinks = LINKS.filter((l) => !l.pageKey || status[l.pageKey] !== '非公開')
 
   return (
     <header

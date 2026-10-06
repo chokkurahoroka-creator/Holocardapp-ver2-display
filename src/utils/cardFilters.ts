@@ -1,25 +1,33 @@
 import type { Card } from '../types/card'
 
+// 各カテゴリは複数選択可（カテゴリ内は常にOR）。カテゴリ間の組み合わせ方はlogicで選べる(AND/OR)。
+// HPだけは範囲指定（min/max、スライダー操作）
+export type FilterLogic = 'and' | 'or'
+
 export type CardFilters = {
-  skillType: string
+  logic: FilterLogic
+  skillTypes: string[]
   hpMin: string
   hpMax: string
-  tag: string
-  batonTouch: string
-  attribute: string
-  cardType: string
-  stage: string
+  tags: string[]
+  batonTouches: string[]
+  attributes: string[]
+  cardTypes: string[]
+  stages: string[]
+  setCodes: string[] // 「全カード検索」ページでのみ使用（カード一覧側は常に空）
 }
 
 export const EMPTY_FILTERS: CardFilters = {
-  skillType: '',
+  logic: 'and',
+  skillTypes: [],
   hpMin: '',
   hpMax: '',
-  tag: '',
-  batonTouch: '',
-  attribute: '',
-  cardType: '',
-  stage: '',
+  tags: [],
+  batonTouches: [],
+  attributes: [],
+  cardTypes: [],
+  stages: [],
+  setCodes: [],
 }
 
 type SkillRow = { skillType?: string }
@@ -73,20 +81,76 @@ export function distinctStages(cards: Card[]): string[] {
   return sortJa(Array.from(new Set(cards.map((c) => c.stage).filter((v): v is string => !!v))))
 }
 
+// カードが実際に持っているHPの最小・最大値（スライダーの可動域に使う）。カードが無ければ既定で0〜200
+export function hpBounds(cards: Card[]): { min: number; max: number } {
+  const values = cards.map((c) => c.hp).filter((v): v is number => v !== null && v !== undefined)
+  if (values.length === 0) return { min: 0, max: 200 }
+  const min = Math.floor(Math.min(...values) / 10) * 10
+  const max = Math.ceil(Math.max(...values) / 10) * 10
+  return { min, max: Math.max(max, min + 10) }
+}
+
+function matchesAny(selected: string[], value: string | null | undefined): boolean {
+  if (selected.length === 0) return true
+  return !!value && selected.includes(value)
+}
+
+function hpInRange(c: Card, filters: CardFilters): boolean {
+  if (!filters.hpMin && !filters.hpMax) return true
+  if (c.hp === null || c.hp === undefined) return false
+  if (filters.hpMin && c.hp < Number(filters.hpMin)) return false
+  if (filters.hpMax && c.hp > Number(filters.hpMax)) return false
+  return true
+}
+
+// カテゴリごとの一致判定を、アクティブなものだけ配列で返す（AND/ORの切り替えに使う）
+function activeCategoryChecks(c: Card, filters: CardFilters): boolean[] {
+  const checks: boolean[] = []
+  if (filters.skillTypes.length > 0) checks.push(cardSkillTypes(c).some((t) => filters.skillTypes.includes(t)))
+  if (filters.hpMin || filters.hpMax) checks.push(hpInRange(c, filters))
+  if (filters.tags.length > 0) checks.push(splitTags(c.tags).some((t) => filters.tags.includes(t)))
+  if (filters.batonTouches.length > 0) checks.push(filters.batonTouches.includes(String(c.baton_touch_cost ?? '')))
+  if (filters.attributes.length > 0) checks.push(matchesAny(filters.attributes, c.attribute))
+  if (filters.cardTypes.length > 0) checks.push(matchesAny(filters.cardTypes, c.card_type))
+  if (filters.stages.length > 0) checks.push(matchesAny(filters.stages, c.stage))
+  if (filters.setCodes.length > 0) checks.push(matchesAny(filters.setCodes, c.set_code))
+  return checks
+}
+
 export function applyCardFilters(cards: Card[], filters: CardFilters): Card[] {
   return cards.filter((c) => {
-    if (filters.skillType && !cardSkillTypes(c).includes(filters.skillType)) return false
-    if (filters.hpMin && (c.hp === null || c.hp === undefined || c.hp < Number(filters.hpMin))) return false
-    if (filters.hpMax && (c.hp === null || c.hp === undefined || c.hp > Number(filters.hpMax))) return false
-    if (filters.tag && !splitTags(c.tags).includes(filters.tag)) return false
-    if (filters.batonTouch && String(c.baton_touch_cost ?? '') !== filters.batonTouch) return false
-    if (filters.attribute && c.attribute !== filters.attribute) return false
-    if (filters.cardType && c.card_type !== filters.cardType) return false
-    if (filters.stage && c.stage !== filters.stage) return false
-    return true
+    const checks = activeCategoryChecks(c, filters)
+    if (checks.length === 0) return true
+    return filters.logic === 'or' ? checks.some(Boolean) : checks.every(Boolean)
   })
 }
 
 export function hasActiveFilters(filters: CardFilters): boolean {
-  return Object.values(filters).some((v) => v !== '')
+  return (
+    filters.skillTypes.length > 0 ||
+    filters.hpMin !== '' ||
+    filters.hpMax !== '' ||
+    filters.tags.length > 0 ||
+    filters.batonTouches.length > 0 ||
+    filters.attributes.length > 0 ||
+    filters.cardTypes.length > 0 ||
+    filters.stages.length > 0 ||
+    filters.setCodes.length > 0
+  )
+}
+
+// 現在アクティブなフィルター条件を「カテゴリ: 値」のチップ一覧として返す（選択解除ボタン用）
+export function activeFilterChips(filters: CardFilters): { category: keyof CardFilters; value: string; label: string }[] {
+  const chips: { category: keyof CardFilters; value: string; label: string }[] = []
+  filters.skillTypes.forEach((v) => chips.push({ category: 'skillTypes', value: v, label: `スキル種類: ${v}` }))
+  filters.tags.forEach((v) => chips.push({ category: 'tags', value: v, label: `タグ: ${v}` }))
+  filters.batonTouches.forEach((v) => chips.push({ category: 'batonTouches', value: v, label: `バトンタッチ: ${v}` }))
+  filters.attributes.forEach((v) => chips.push({ category: 'attributes', value: v, label: `カード色: ${v}` }))
+  filters.cardTypes.forEach((v) => chips.push({ category: 'cardTypes', value: v, label: `カード種類: ${v}` }))
+  filters.stages.forEach((v) => chips.push({ category: 'stages', value: v, label: `進化レベル: ${v}` }))
+  filters.setCodes.forEach((v) => chips.push({ category: 'setCodes', value: v, label: `弾: ${v}` }))
+  if (filters.hpMin || filters.hpMax) {
+    chips.push({ category: 'hpMin', value: '__hp__', label: `HP: ${filters.hpMin || '0'}〜${filters.hpMax || '∞'}` })
+  }
+  return chips
 }

@@ -7,7 +7,8 @@ import { sortCards, type SortKey, type SortDir } from '../utils/sortCards'
 import { CardGrid } from '../components/CardGrid'
 import { SlotGrid } from '../components/SlotGrid'
 import { CardFilterPanel } from '../components/CardFilterPanel'
-import { applyCardFilters, hasActiveFilters, EMPTY_FILTERS, type CardFilters } from '../utils/cardFilters'
+import { FilterIcon } from '../components/FilterIcon'
+import { applyCardFilters, hasActiveFilters, activeFilterChips, EMPTY_FILTERS, type CardFilters } from '../utils/cardFilters'
 import { CardModal } from '../components/CardModal'
 import { MaintenanceBanner } from '../components/MaintenanceBanner'
 import type { Card } from '../types/card'
@@ -36,6 +37,7 @@ export function DisplayPage() {
   const [sortKey, setSortKey] = useState<SortKey>('slot')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [filters, setFilters] = useState<CardFilters>(EMPTY_FILTERS)
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false)
 
   // 弾を切り替えたら、別の弾の選択肢が残らないようフィルターをリセットする
   useEffect(() => {
@@ -199,6 +201,16 @@ export function DisplayPage() {
             >
               {selectionMode ? '選択モードを終了' : '選択してダウンロード'}
             </button>
+
+            <button
+              className={filterPanelOpen || hasActiveFilters(filters) ? 'btn-primary' : 'btn-secondary'}
+              onClick={() => setFilterPanelOpen((v) => !v)}
+              title="絞り込みフィルター"
+              aria-label="絞り込みフィルター"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              <FilterIcon /> フィルター{hasActiveFilters(filters) ? `（${activeFilterChips(filters).length}）` : ''}
+            </button>
           </div>
 
           {/* お気に入りグループ */}
@@ -227,10 +239,12 @@ export function DisplayPage() {
             )}
           </div>
 
-          {/* 絞り込みフィルター */}
-          <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--hud-line)' }}>
-            <CardFilterPanel cards={cards} filters={filters} onChange={setFilters} />
-          </div>
+          {/* 絞り込みフィルター（フィルターボタンを押したときだけ表示） */}
+          {filterPanelOpen && (
+            <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--hud-line)' }}>
+              <CardFilterPanel cards={cards} filters={filters} onChange={setFilters} />
+            </div>
+          )}
         </section>
 
         {/* 件数・読み込み状態 */}
