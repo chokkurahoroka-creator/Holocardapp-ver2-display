@@ -1,11 +1,11 @@
 import type { MouseEvent } from 'react'
 import type { Card } from '../types/card'
 import { CardTile } from './CardTile'
+import { useGridLayout } from '../hooks/useGridLayout'
 
 type Props = {
   cards: Card[] // この区分（新規/再録/パラレル）のカードだけを渡す
-  startNumber: number // この区分の最初のスロットの通し番号（新規は1、再録はtotal_new+1、パラレルはtotal_new+total_rerun+1）
-  count: number // この区分に設定されている枚数（total_new/total_rerun/total_parallel）。0以下なら登録済みカードだけを番号順に並べる
+  count: number // この区分に設定されている枚数（total_new/total_rerun/total_parallel）。0以下なら登録済みカードだけをスロット番号順に並べる
   onCardClick: (card: Card) => void
   isFav: (card: Card) => boolean
   onToggleFav: (card: Card, e: MouseEvent) => void
@@ -17,7 +17,6 @@ type Props = {
 
 export function SlotGrid({
   cards,
-  startNumber,
   count,
   onCardClick,
   isFav,
@@ -27,32 +26,39 @@ export function SlotGrid({
   onToggleSelect,
   tileScale = 1,
 }: Props) {
-  // 通し番号（overall_number）でカードを引けるようにしておく。
-  // 古いデータ等でoverall_numberが入っていないカードは配置スロット番号で代用する
-  const byNumber = new Map<number, Card>()
+  // 区分（新規/再録/パラレル）ごとのスロット番号（slot）でカードを引く。
+  // 通し番号（overall_number）は、弾の枚数設定を後から変えるとずれるため、ここでは使わない
+  const bySlot = new Map<number, Card>()
   cards.forEach((c) => {
-    byNumber.set(c.overall_number ?? c.slot, c)
+    bySlot.set(Number(c.slot), c)
   })
+
+  const layout = useGridLayout(tileScale)
 
   const items: { number: number; card: Card | null }[] = []
   if (count > 0) {
-    for (let n = startNumber; n < startNumber + count; n++) {
-      items.push({ number: n, card: byNumber.get(n) ?? null })
+    for (let n = 1; n <= count; n++) {
+      items.push({ number: n, card: bySlot.get(n) ?? null })
     }
+    // 設定枚数を超えるスロット番号で登録されたカードも、消えないよう末尾に並べる
+    cards
+      .filter((c) => Number(c.slot) > count || Number(c.slot) < 1)
+      .sort((a, b) => Number(a.slot) - Number(b.slot))
+      .forEach((c) => items.push({ number: Number(c.slot), card: c }))
   } else {
-    // 枚数設定が無い弾は、登録済みカードだけを番号順に並べる（空枠は出さない）
+    // 枚数設定が無い弾は、登録済みカードだけをスロット番号順に並べる（空枠は出さない）
     cards
       .slice()
-      .sort((a, b) => (a.overall_number ?? a.slot) - (b.overall_number ?? b.slot))
-      .forEach((c) => items.push({ number: c.overall_number ?? c.slot, card: c }))
+      .sort((a, b) => Number(a.slot) - Number(b.slot))
+      .forEach((c) => items.push({ number: Number(c.slot), card: c }))
   }
 
   return (
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: `repeat(auto-fill, minmax(clamp(${Math.round(110 * tileScale)}px, 40vw, ${Math.round(160 * tileScale)}px), 1fr))`,
-        gap: 12,
+        gridTemplateColumns: layout.gridTemplateColumns,
+        gap: layout.gap,
       }}
     >
       {items.map((it) =>
@@ -66,7 +72,7 @@ export function SlotGrid({
             selectionMode={selectionMode}
             selected={selectedIds.has(it.card.id)}
             onToggleSelect={onToggleSelect}
-            compact={tileScale < 0.75}
+            compact={layout.compact}
           />
         ) : (
           <div
@@ -82,7 +88,7 @@ export function SlotGrid({
               background: 'rgba(255,255,255,0.02)',
             }}
           >
-            <span className="hud-mono" style={{ fontSize: tileScale < 0.75 ? 10 : 13, color: 'var(--hud-ink-dim)' }}>
+            <span className="hud-mono" style={{ fontSize: layout.compact ? 10 : 13, color: 'var(--hud-ink-dim)' }}>
               No.{it.number}
             </span>
           </div>

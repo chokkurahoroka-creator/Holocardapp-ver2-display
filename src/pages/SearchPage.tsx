@@ -93,7 +93,7 @@ export function SearchPage() {
           <select className="field" value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
             <option value="name">カード名順</option>
             <option value="rarity">レアリティ順</option>
-            <option value="slot">枠番号順</option>
+            <option value="overall">カード番号順（通し番号）</option>
             <option value="hp">HP順</option>
           </select>
           <button className="btn-secondary" onClick={() => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')}>
@@ -158,4 +158,4 @@ export function SearchPage() {
       <CardSizeControl scale={cardScale} onChange={setCardScale} />
     </div>
   )
-}　
+}

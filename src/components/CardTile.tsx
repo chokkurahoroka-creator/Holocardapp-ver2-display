@@ -9,7 +9,7 @@ type Props = {
   selectionMode: boolean
   selected: boolean
   onToggleSelect: (card: Card) => void
-  compact?: boolean // 小さい表示サイズのとき、下部のテキスト情報を非表示にする
+  compact?: boolean // 小さい表示サイズ・スマホの多列表示のとき、下部のテキスト情報を非表示にして余白も詰める
 }
 
 export function CardTile({ card, onClick, isFav, onToggleFav, selectionMode, selected, onToggleSelect, compact = false }: Props) {
@@ -25,11 +25,11 @@ export function CardTile({ card, onClick, isFav, onToggleFav, selectionMode, sel
         <div
           style={{
             position: 'absolute',
-            top: 10,
-            left: 10,
+            top: compact ? 4 : 10,
+            left: compact ? 4 : 10,
             zIndex: 2,
-            width: 24,
-            height: 24,
+            width: compact ? 18 : 24,
+            height: compact ? 18 : 24,
             borderRadius: '50%',
             background: selected ? 'var(--hud-cyan)' : 'rgba(6,18,23,0.7)',
             border: selected ? 'none' : '1px solid var(--hud-line)',
@@ -37,7 +37,7 @@ export function CardTile({ card, onClick, isFav, onToggleFav, selectionMode, sel
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: 14,
+            fontSize: compact ? 11 : 14,
             fontWeight: 'bold',
           }}
         >
@@ -51,16 +51,17 @@ export function CardTile({ card, onClick, isFav, onToggleFav, selectionMode, sel
           }}
           style={{
             position: 'absolute',
-            top: 10,
-            left: 10,
+            top: compact ? 4 : 10,
+            left: compact ? 4 : 10,
             zIndex: 2,
             background: 'rgba(6,18,23,0.7)',
             border: '1px solid var(--hud-line)',
             borderRadius: '50%',
-            width: 28,
-            height: 28,
+            width: compact ? 20 : 28,
+            height: compact ? 20 : 28,
             color: isFav ? 'var(--hud-cyan)' : '#fff',
-            fontSize: 16,
+            fontSize: compact ? 11 : 16,
+            lineHeight: 1,
             cursor: 'pointer',
             padding: 0,
           }}
@@ -69,7 +70,7 @@ export function CardTile({ card, onClick, isFav, onToggleFav, selectionMode, sel
         </button>
       )}
 
-      <div style={{ padding: 6 }}>{card.image_url && renderRarityFrame(card.image_url, card.card_name, card.rarity)}</div>
+      <div style={{ padding: compact ? 3 : 6 }}>{card.image_url && renderRarityFrame(card.image_url, card.card_name, card.rarity)}</div>
 
       {!compact && (
         <div style={{ padding: '2px 8px 8px' }}>
@@ -99,11 +100,6 @@ export function CardTile({ card, onClick, isFav, onToggleFav, selectionMode, sel
                 {card.card_type}
               </div>
             )}
-          </div>
-          <div style={{ fontSize: 13, fontWeight: 'bold', marginTop: 2, color: 'var(--hud-ink)' }}>{card.card_name}</div>
-          <div className="hud-mono" style={{ fontSize: 10, color: 'var(--hud-ink-dim)', marginTop: 2 }}>
-            {card.attribute ?? ''}
-            {card.hp ? ` / HP${card.hp}` : ''}
           </div>
         </div>
       )}

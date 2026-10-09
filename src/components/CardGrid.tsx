@@ -1,5 +1,6 @@
 import type { Card } from '../types/card'
 import { CardTile } from './CardTile'
+import { useGridLayout } from '../hooks/useGridLayout'
 
 type Props = {
   cards: Card[]
@@ -13,15 +14,14 @@ type Props = {
 }
 
 export function CardGrid({ cards, onCardClick, isFav, onToggleFav, selectionMode, selectedIds, onToggleSelect, tileScale = 1 }: Props) {
+  // PCは最小タイル幅ベースの自動列数、スマホは倍率1で4列（詳細はuseGridLayout）
+  const layout = useGridLayout(tileScale)
   return (
     <div
       style={{
         display: 'grid',
-        // 最小タイル幅をclamp()でビューポート幅に応じて縮めることで、
-        // 狭いスマホ画面でもメディアクエリ無しで無理なく2列前後に収まるようにする。
-        // tileScaleで上限・下限どちらも拡大縮小する
-        gridTemplateColumns: `repeat(auto-fill, minmax(clamp(${Math.round(110 * tileScale)}px, 40vw, ${Math.round(160 * tileScale)}px), 1fr))`,
-        gap: 12,
+        gridTemplateColumns: layout.gridTemplateColumns,
+        gap: layout.gap,
       }}
     >
       {cards.map((card) => (
@@ -34,7 +34,7 @@ export function CardGrid({ cards, onCardClick, isFav, onToggleFav, selectionMode
           selectionMode={selectionMode}
           selected={selectedIds.has(card.id)}
           onToggleSelect={onToggleSelect}
-          compact={tileScale < 0.75}
+          compact={layout.compact}
         />
       ))}
     </div>

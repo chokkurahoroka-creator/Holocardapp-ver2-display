@@ -40,6 +40,9 @@ export function DisplayPage() {
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [filters, setFilters] = useState<CardFilters>(EMPTY_FILTERS)
   const [filterPanelOpen, setFilterPanelOpen] = useState(false)
+  // 操作パネル（弾選択・検索・並び替え・フィルター・お気に入り）の開閉。
+  // 普段は邪魔にならないよう閉じておき、弾が未選択のときだけ最初から開く
+  const [controlsOpen, setControlsOpen] = useState(() => !localStorage.getItem(STORAGE_KEY))
 
   // カード表示サイズ（右下の+/🔄/-ボタンで変更）。端末ごとに前回の設定を覚えておく
   const [cardScale, setCardScale] = useState(() => {
@@ -66,16 +69,16 @@ export function DisplayPage() {
     .slice()
     .sort((a, b) => a.set_name.localeCompare(b.set_name, 'ja'))
 
-  // 通し番号（overall_number）の割り振り方は登録時と同じ: 新規=1〜、再録=新規の続き、パラレル=再録の続き
+  // 空き枠は区分ごとのスロット番号（slot）で1〜設定枚数まで表示する（通し番号は使わない）
   const setInfo = sets.find((s) => s.set_code === setCode)
   // 検索中や、枠番号順以外の並び替えをしているときは「空いている枠」の概念がそのままでは意味を持たないため、
   // 検索なし・枠番号順のときだけ空き枠を表示する
   const showEmptySlots = !searchQuery.trim() && !hasActiveFilters(filters) && sortKey === 'slot' && !!setInfo
   const slotTypeConfig = setInfo
     ? [
-        { type: '新規' as const, start: 1, count: setInfo.total_new ?? 0 },
-        { type: '再録' as const, start: (setInfo.total_new ?? 0) + 1, count: setInfo.total_rerun ?? 0 },
-        { type: 'パラレル' as const, start: (setInfo.total_new ?? 0) + (setInfo.total_rerun ?? 0) + 1, count: setInfo.total_parallel ?? 0 },
+        { type: '新規' as const, count: setInfo.total_new ?? 0 },
+        { type: '再録' as const, count: setInfo.total_rerun ?? 0 },
+        { type: 'パラレル' as const, count: setInfo.total_parallel ?? 0 },
       ]
     : []
 
@@ -182,7 +185,43 @@ export function DisplayPage() {
       >
         <SiteNav />
 
+        {/* 操作パネルの開閉バー（ナビの直下）。▼で開き、▲で閉じる */}
+        <button
+          type="button"
+          onClick={() => setControlsOpen((v) => !v)}
+          aria-expanded={controlsOpen}
+          aria-label={controlsOpen ? '操作パネルを閉じる' : '操作パネルを開く'}
+          className="hud-mono"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            width: '100%',
+            padding: '4px 10px',
+            marginBottom: controlsOpen ? 8 : 12,
+            background: 'transparent',
+            border: '1px solid var(--hud-line)',
+            borderRadius: 4,
+            color: 'var(--hud-ink-dim)',
+            fontSize: 11,
+            cursor: 'pointer',
+            textAlign: 'left',
+          }}
+        >
+          <span style={{ color: 'var(--hud-cyan)', fontSize: 13, lineHeight: 1 }}>{controlsOpen ? '▲' : '▼'}</span>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {[
+              setCode ?? '弾を選択',
+              searchQuery.trim() ? `検索:${searchQuery.trim()}` : '',
+              hasActiveFilters(filters) ? `フィルター(${activeFilterChips(filters).length})` : '',
+            ]
+              .filter(Boolean)
+              .join(' ／ ')}
+          </span>
+        </button>
+
         {/* 操作パネル */}
+        {controlsOpen && (
         <section className="hud-panel" style={{ padding: 'clamp(10px, 3vw, 16px)', marginBottom: 20 }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
             <select
@@ -269,6 +308,7 @@ export function DisplayPage() {
             </div>
           )}
         </section>
+        )}
 
         {/* 件数・読み込み状態 */}
         <div className="hud-mono" style={{ fontSize: 12, color: 'var(--hud-ink-dim)', marginBottom: 12 }}>
@@ -304,7 +344,6 @@ export function DisplayPage() {
                     </h3>
                     <SlotGrid
                       cards={typeCards}
-                      startNumber={tc.start}
                       count={tc.count}
                       onCardClick={handleCardClick}
                       isFav={(c) => isFav(c, activeGroup)}
