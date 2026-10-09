@@ -5,7 +5,7 @@ import { useCardSearch } from '../hooks/useCardSearch'
 import { useSiteStatus } from '../hooks/useSiteStatus'
 import { sortCards, type SortKey, type SortDir } from '../utils/sortCards'
 import { CardGrid } from '../components/CardGrid'
-import { SlotGrid } from '../components/SlotGrid'
+import { SlotGrid, orderSlotCards } from '../components/SlotGrid'
 import { CardFilterPanel } from '../components/CardFilterPanel'
 import { FilterIcon } from '../components/FilterIcon'
 import { applyCardFilters, hasActiveFilters, activeFilterChips, EMPTY_FILTERS, type CardFilters } from '../utils/cardFilters'
@@ -18,6 +18,7 @@ import { logEvent, logDownloadEvents } from '../lib/logEvent'
 import { SiteNav } from '../components/SiteNav'
 import { CardSizeControl, CARD_SIZE_DEFAULT } from '../components/CardSizeControl'
 import { ControlsBar, useControlsOpen } from '../components/ControlsBar'
+import { PackSelect } from '../components/PackSelect'
 
 const THIS_PAGE_KEY = 'display'
 const STORAGE_KEY = 'horoka-display:display:setCode'
@@ -83,6 +84,18 @@ export function DisplayPage() {
       ]
     : []
 
+  // 詳細モーダルの前へ/次へで辿る順序。一覧に表示されている並び（区分ごとのまとまり・並べ替え後の順）そのままにする
+  const navCards: Card[] = showEmptySlots
+    ? slotTypeConfig
+        .filter((tc) => tc.count > 0 || cards.some((c) => c.type === tc.type))
+        .flatMap((tc) =>
+          orderSlotCards(
+            cards.filter((c) => c.type === tc.type),
+            tc.count
+          )
+        )
+    : groupedByType.flatMap((g) => g.cards)
+
   const [navIndex, setNavIndex] = useState(-1)
 
   // ----- サイト訪問ログ：初回マウント時に1回だけ記録 -----
@@ -106,7 +119,7 @@ export function DisplayPage() {
   }, [searchQuery])
 
   const handleSelectRelated = (card: Card) => {
-    const idx = sorted.findIndex((c) => c.id === card.id)
+    const idx = navCards.findIndex((c) => c.id === card.id)
     if (idx !== -1) {
       setNavIndex(idx)
     } else {
@@ -115,17 +128,17 @@ export function DisplayPage() {
   }
 
   const handleCardClick = (card: Card) => {
-    const idx = sorted.findIndex((c) => c.id === card.id)
+    const idx = navCards.findIndex((c) => c.id === card.id)
     setNavIndex(idx)
     if (idx !== -1) {
       logEvent('view', { set_code: card.set_code, type: card.type, slot: card.slot, card_name: card.card_name })
     }
   }
   const handleClose = () => setNavIndex(-1)
-  const handlePrev = () => setNavIndex((i) => (i - 1 + sorted.length) % sorted.length)
-  const handleNext = () => setNavIndex((i) => (i + 1) % sorted.length)
+  const handlePrev = () => setNavIndex((i) => (i - 1 + navCards.length) % navCards.length)
+  const handleNext = () => setNavIndex((i) => (i + 1) % navCards.length)
 
-  const currentCard = navIndex !== -1 ? sorted[navIndex] : null
+  const currentCard = navIndex !== -1 ? navCards[navIndex] ?? null : null
   const { favGroups, activeGroup, setActiveGroup, isFav, createGroup, toggleFav, deleteGroup } = useFavorites()
   const handleToggleFav = (card: Card) => {
     if (!activeGroup) {
@@ -192,19 +205,7 @@ export function DisplayPage() {
           onToggle={() => setControlsOpen((v) => !v)}
           active={!!searchQuery.trim() || hasActiveFilters(filters)}
         >
-          <select
-            className="field hud-mono"
-            value={setCode ?? ''}
-            onChange={(e) => setSetCode(e.target.value || null)}
-            style={{ maxWidth: '100%', width: 'clamp(120px, 38vw, 260px)' }}
-          >
-            <option value="">弾を選択してください</option>
-            {visibleSets.map((s) => (
-              <option key={s.set_code} value={s.set_code}>
-                {s.set_code}（{s.set_name}）
-              </option>
-            ))}
-          </select>
+          <PackSelect sets={visibleSets} value={setCode} onChange={setSetCode} />
 
           <select className="field" value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
             <option value="slot">枠番号順</option>
@@ -366,7 +367,7 @@ export function DisplayPage() {
           onClose={handleClose}
           onPrev={handlePrev}
           onNext={handleNext}
-          hasNav={sorted.length > 1}
+          hasNav={navCards.length > 1}
           onSelectCard={handleSelectRelated}
         />
       </div>

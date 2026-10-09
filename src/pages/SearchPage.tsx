@@ -66,15 +66,17 @@ export function SearchPage() {
   const searched = useCardSearch(filteredByPanel, searchQuery)
   const sorted = sortCards(searched, sortKey, sortDir)
   const grouped = groupCardsBySet(sorted, setNameByCode)
+  // 詳細モーダルの前へ/次へで辿る順序。一覧に表示されている並び（弾ごとのまとまり・並べ替え後の順）そのままにする
+  const navCards = grouped.flatMap((g) => g.cards)
 
   const handleCardClick = (card: Card) => {
-    const idx = sorted.findIndex((c) => c.id === card.id)
+    const idx = navCards.findIndex((c) => c.id === card.id)
     setNavIndex(idx)
   }
   const handleClose = () => setNavIndex(-1)
-  const handlePrev = () => setNavIndex((i) => (i - 1 + sorted.length) % sorted.length)
-  const handleNext = () => setNavIndex((i) => (i + 1) % sorted.length)
-  const currentCard = navIndex !== -1 ? sorted[navIndex] : null
+  const handlePrev = () => setNavIndex((i) => (i - 1 + navCards.length) % navCards.length)
+  const handleNext = () => setNavIndex((i) => (i + 1) % navCards.length)
+  const currentCard = navIndex !== -1 ? navCards[navIndex] ?? null : null
 
   return (
     <div style={{ padding: 'clamp(10px, 4vw, 20px)' }}>
@@ -164,7 +166,7 @@ export function SearchPage() {
         </div>
       ))}
 
-      <CardModal card={currentCard} onClose={handleClose} onPrev={handlePrev} onNext={handleNext} hasNav={sorted.length > 1} onSelectCard={() => {}} />
+      <CardModal card={currentCard} onClose={handleClose} onPrev={handlePrev} onNext={handleNext} hasNav={navCards.length > 1} onSelectCard={() => {}} />
       <CardSizeControl scale={cardScale} onChange={setCardScale} />
     </div>
   )

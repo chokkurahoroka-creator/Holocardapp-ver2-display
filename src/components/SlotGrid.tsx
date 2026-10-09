@@ -15,27 +15,17 @@ type Props = {
   tileScale?: number // 右下の表示サイズ変更ボタンから渡される倍率（既定1）
 }
 
-export function SlotGrid({
-  cards,
-  count,
-  onCardClick,
-  isFav,
-  onToggleFav,
-  selectionMode,
-  selectedIds,
-  onToggleSelect,
-  tileScale = 1,
-}: Props) {
-  // 区分（新規/再録/パラレル）ごとのスロット番号（slot）でカードを引く。
-  // 通し番号（overall_number）は、弾の枚数設定を後から変えるとずれるため、ここでは使わない
+type SlotItem = { number: number; card: Card | null }
+
+// 区分（新規/再録/パラレル）ごとのスロット番号（slot）でカードを引いて、表示順の枠一覧を作る。
+// 通し番号（overall_number）は、弾の枚数設定を後から変えるとずれるため、ここでは使わない
+function buildSlotItems(cards: Card[], count: number): SlotItem[] {
   const bySlot = new Map<number, Card>()
   cards.forEach((c) => {
     bySlot.set(Number(c.slot), c)
   })
 
-  const layout = useGridLayout(tileScale)
-
-  const items: { number: number; card: Card | null }[] = []
+  const items: SlotItem[] = []
   if (count > 0) {
     for (let n = 1; n <= count; n++) {
       items.push({ number: n, card: bySlot.get(n) ?? null })
@@ -52,6 +42,27 @@ export function SlotGrid({
       .sort((a, b) => Number(a.slot) - Number(b.slot))
       .forEach((c) => items.push({ number: Number(c.slot), card: c }))
   }
+  return items
+}
+
+// 一覧に実際に表示される順（空き枠は除く）のカード配列。詳細モーダルの前へ/次への順序に使う
+export function orderSlotCards(cards: Card[], count: number): Card[] {
+  return buildSlotItems(cards, count).flatMap((it) => (it.card ? [it.card] : []))
+}
+
+export function SlotGrid({
+  cards,
+  count,
+  onCardClick,
+  isFav,
+  onToggleFav,
+  selectionMode,
+  selectedIds,
+  onToggleSelect,
+  tileScale = 1,
+}: Props) {
+  const layout = useGridLayout(tileScale)
+  const items = buildSlotItems(cards, count)
 
   return (
     <div
