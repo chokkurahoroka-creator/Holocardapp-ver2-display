@@ -40,11 +40,12 @@ const navButtonStyle: CSSProperties = {
 const SWIPE_MIN_DISTANCE = 50
 const SWIPE_DIRECTION_RATIO = 1.5
 
-// タグ文字列から個々のタグを取り出す（空白・カンマ・読点・中黒区切り。絞り込みフィルターと同じ）
+// タグ文字列から個々のタグを取り出す（空白・カンマ・読点・中黒区切り。絞り込みフィルターと同じ）。
+// 登録時点で「#」が付いているタグもあるため、先頭の#（全角＃も）は取り除いて、表示側で付け直す
 function splitTags(tags: string | null | undefined): string[] {
   return (tags ?? '')
     .split(/[\s,、・]+/)
-    .map((t) => t.trim())
+    .map((t) => t.trim().replace(/^[#＃]+/, ''))
     .filter(Boolean)
 }
 

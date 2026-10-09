@@ -17,6 +17,7 @@ import { downloadCardsAsZip } from '../lib/download'
 import { logEvent, logDownloadEvents } from '../lib/logEvent'
 import { SiteNav } from '../components/SiteNav'
 import { CardSizeControl, CARD_SIZE_DEFAULT } from '../components/CardSizeControl'
+import { ControlsBar, useControlsOpen } from '../components/ControlsBar'
 
 const THIS_PAGE_KEY = 'display'
 const STORAGE_KEY = 'horoka-display:display:setCode'
@@ -40,9 +41,9 @@ export function DisplayPage() {
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [filters, setFilters] = useState<CardFilters>(EMPTY_FILTERS)
   const [filterPanelOpen, setFilterPanelOpen] = useState(false)
-  // 操作パネル（弾選択・検索・並び替え・フィルター・お気に入り）の開閉。
-  // 普段は邪魔にならないよう閉じておき、弾が未選択のときだけ最初から開く
-  const [controlsOpen, setControlsOpen] = useState(() => !localStorage.getItem(STORAGE_KEY))
+  // 操作パネル（検索・一括ダウンロード・フィルター・お気に入り）の開閉。普段は閉じておく。
+  // 弾選択・並び替え・昇降順は、パネルを閉じていても使えるよう開閉タブの横に常時表示する
+  const [controlsOpen, setControlsOpen] = useControlsOpen('display', false)
 
   // カード表示サイズ（右下の+/🔄/-ボタンで変更）。端末ごとに前回の設定を覚えておく
   const [cardScale, setCardScale] = useState(() => {
@@ -185,59 +186,41 @@ export function DisplayPage() {
       >
         <SiteNav />
 
-        {/* 操作パネルの開閉バー（ナビの直下）。▼で開き、▲で閉じる */}
-        <button
-          type="button"
-          onClick={() => setControlsOpen((v) => !v)}
-          aria-expanded={controlsOpen}
-          aria-label={controlsOpen ? '操作パネルを閉じる' : '操作パネルを開く'}
-          className="hud-mono"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            width: '100%',
-            padding: '4px 10px',
-            marginBottom: controlsOpen ? 8 : 12,
-            background: 'transparent',
-            border: '1px solid var(--hud-line)',
-            borderRadius: 4,
-            color: 'var(--hud-ink-dim)',
-            fontSize: 11,
-            cursor: 'pointer',
-            textAlign: 'left',
-          }}
+        {/* 開閉タブ（▼/▲）と、その横に常時表示する弾選択・並び替え・昇降順 */}
+        <ControlsBar
+          open={controlsOpen}
+          onToggle={() => setControlsOpen((v) => !v)}
+          active={!!searchQuery.trim() || hasActiveFilters(filters)}
         >
-          <span style={{ color: 'var(--hud-cyan)', fontSize: 13, lineHeight: 1 }}>{controlsOpen ? '▲' : '▼'}</span>
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {[
-              setCode ?? '弾を選択',
-              searchQuery.trim() ? `検索:${searchQuery.trim()}` : '',
-              hasActiveFilters(filters) ? `フィルター(${activeFilterChips(filters).length})` : '',
-            ]
-              .filter(Boolean)
-              .join(' ／ ')}
-          </span>
-        </button>
+          <select
+            className="field hud-mono"
+            value={setCode ?? ''}
+            onChange={(e) => setSetCode(e.target.value || null)}
+            style={{ maxWidth: '100%', width: 'clamp(120px, 38vw, 260px)' }}
+          >
+            <option value="">弾を選択してください</option>
+            {visibleSets.map((s) => (
+              <option key={s.set_code} value={s.set_code}>
+                {s.set_code}（{s.set_name}）
+              </option>
+            ))}
+          </select>
+
+          <select className="field" value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
+            <option value="slot">枠番号順</option>
+            <option value="rarity">レアリティ順</option>
+            <option value="name">カード名順</option>
+            <option value="hp">HP順</option>
+          </select>
+          <button className="btn-secondary" onClick={() => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')}>
+            {sortDir === 'asc' ? '昇順 ▲' : '降順 ▼'}
+          </button>
+        </ControlsBar>
 
         {/* 操作パネル */}
         {controlsOpen && (
         <section className="hud-panel" style={{ padding: 'clamp(10px, 3vw, 16px)', marginBottom: 20 }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
-            <select
-              className="field hud-mono"
-              value={setCode ?? ''}
-              onChange={(e) => setSetCode(e.target.value || null)}
-              style={{ maxWidth: '100%', width: 'clamp(140px, 60vw, 260px)' }}
-            >
-              <option value="">弾を選択してください</option>
-              {visibleSets.map((s) => (
-                <option key={s.set_code} value={s.set_code}>
-                  {s.set_code}（{s.set_name}）
-                </option>
-              ))}
-            </select>
-
             <input
               className="field"
               type="text"
@@ -246,16 +229,6 @@ export function DisplayPage() {
               onChange={(e) => setSearchQuery(e.target.value)}
               style={{ flex: '1 1 200px', minWidth: 160 }}
             />
-
-            <select className="field" value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
-              <option value="slot">枠番号順</option>
-              <option value="rarity">レアリティ順</option>
-              <option value="name">カード名順</option>
-              <option value="hp">HP順</option>
-            </select>
-            <button className="btn-secondary" onClick={() => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')}>
-              {sortDir === 'asc' ? '昇順 ▲' : '降順 ▼'}
-            </button>
 
             <button
               className={selectionMode ? 'btn-primary' : 'btn-secondary'}

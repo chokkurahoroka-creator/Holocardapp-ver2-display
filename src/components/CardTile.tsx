@@ -19,7 +19,8 @@ export function CardTile({ card, onClick, isFav, onToggleFav, selectionMode, sel
     <div
       className={`hud-tile group${selected ? ' selected' : ''}`}
       onClick={() => (selectionMode ? onToggleSelect(card) : onClick(card))}
-      style={{ width: '100%' }}
+      // 下部の情報を隠すcompact表示のときは、タイル自体の余白も0にして画像を枠一杯に表示する
+      style={{ width: '100%', ...(compact ? { padding: 0 } : null) }}
     >
       {selectionMode ? (
         <div
@@ -70,7 +71,7 @@ export function CardTile({ card, onClick, isFav, onToggleFav, selectionMode, sel
         </button>
       )}
 
-      <div style={{ padding: compact ? 3 : 6 }}>{card.image_url && renderRarityFrame(card.image_url, card.card_name, card.rarity)}</div>
+      <div style={{ padding: compact ? 0 : 6 }}>{card.image_url && renderRarityFrame(card.image_url, card.card_name, card.rarity)}</div>
 
       {!compact && (
         <div style={{ padding: '2px 8px 8px' }}>

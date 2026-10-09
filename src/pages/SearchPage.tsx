@@ -10,6 +10,7 @@ import { CardModal } from '../components/CardModal'
 import { SiteNav } from '../components/SiteNav'
 import { FilterIcon } from '../components/FilterIcon'
 import { CardSizeControl, CARD_SIZE_DEFAULT } from '../components/CardSizeControl'
+import { ControlsBar, useControlsOpen } from '../components/ControlsBar'
 import type { Card } from '../types/card'
 
 const EMPTY_SELECTION = new Set<number>()
@@ -44,12 +45,12 @@ export function SearchPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('name')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
-  // 初期値は「新カード一覧」で最後に見ていたパックにしておく（無ければすべて対象）
-  const [filters, setFilters] = useState<CardFilters>(() => {
-    const lastSetCode = localStorage.getItem('horoka-display:display:setCode')
-    return lastSetCode ? { ...EMPTY_FILTERS, setCodes: [lastSetCode] } : EMPTY_FILTERS
-  })
+  // 新カード一覧で選んでいるパックには左右されず、最初は全パックを対象に表示する
+  const [filters, setFilters] = useState<CardFilters>(EMPTY_FILTERS)
   const [filterPanelOpen, setFilterPanelOpen] = useState(false)
+  // 操作パネル（キーワード検索・フィルター）の開閉。キーワード検索がこのページの主役なので、初回は開いておく。
+  // 並び替え・昇降順は、パネルを閉じていても使えるよう開閉タブの横に常時表示する
+  const [controlsOpen, setControlsOpen] = useControlsOpen('search', true)
   const [navIndex, setNavIndex] = useState(-1)
 
   // カード表示サイズ（右下の+/🔄/-ボタンで変更）。新カード一覧と設定を共有する
@@ -79,44 +80,53 @@ export function SearchPage() {
     <div style={{ padding: 'clamp(10px, 4vw, 20px)' }}>
       <SiteNav />
 
-      <section className="hud-panel" style={{ padding: 'clamp(10px, 3vw, 16px)', marginBottom: 20 }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
-          <input
-            className="field"
-            type="text"
-            placeholder="カード名・タグ・キーワードで検索（全弾対象）"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            style={{ flex: '1 1 240px', minWidth: 160 }}
-          />
+      {/* 開閉タブ（▼/▲）と、その横に常時表示する並び替え・昇降順 */}
+      <ControlsBar
+        open={controlsOpen}
+        onToggle={() => setControlsOpen((v) => !v)}
+        active={!!searchQuery.trim() || hasActiveFilters(filters)}
+      >
+        <select className="field" value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
+          <option value="name">カード名順</option>
+          <option value="rarity">レアリティ順</option>
+          <option value="overall">カード番号順（通し番号）</option>
+          <option value="hp">HP順</option>
+        </select>
+        <button className="btn-secondary" onClick={() => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')}>
+          {sortDir === 'asc' ? '昇順 ▲' : '降順 ▼'}
+        </button>
+      </ControlsBar>
 
-          <select className="field" value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
-            <option value="name">カード名順</option>
-            <option value="rarity">レアリティ順</option>
-            <option value="overall">カード番号順（通し番号）</option>
-            <option value="hp">HP順</option>
-          </select>
-          <button className="btn-secondary" onClick={() => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')}>
-            {sortDir === 'asc' ? '昇順 ▲' : '降順 ▼'}
-          </button>
+      {controlsOpen && (
+        <section className="hud-panel" style={{ padding: 'clamp(10px, 3vw, 16px)', marginBottom: 20 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
+            <input
+              className="field"
+              type="text"
+              placeholder="カード名・タグ・キーワードで検索（全弾対象）"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{ flex: '1 1 240px', minWidth: 160 }}
+            />
 
-          <button
-            className={filterPanelOpen || hasActiveFilters(filters) ? 'btn-primary' : 'btn-secondary'}
-            onClick={() => setFilterPanelOpen((v) => !v)}
-            title="絞り込みフィルター"
-            aria-label="絞り込みフィルター"
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-          >
-            <FilterIcon /> フィルター{hasActiveFilters(filters) ? `（${activeFilterChips(filters).length}）` : ''}
-          </button>
-        </div>
-
-        {filterPanelOpen && (
-          <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--hud-line)' }}>
-            <CardFilterPanel cards={cards} filters={filters} onChange={setFilters} sets={sets} onClose={() => setFilterPanelOpen(false)} />
+            <button
+              className={filterPanelOpen || hasActiveFilters(filters) ? 'btn-primary' : 'btn-secondary'}
+              onClick={() => setFilterPanelOpen((v) => !v)}
+              title="絞り込みフィルター"
+              aria-label="絞り込みフィルター"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              <FilterIcon /> フィルター{hasActiveFilters(filters) ? `（${activeFilterChips(filters).length}）` : ''}
+            </button>
           </div>
-        )}
-      </section>
+
+          {filterPanelOpen && (
+            <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--hud-line)' }}>
+              <CardFilterPanel cards={cards} filters={filters} onChange={setFilters} sets={sets} onClose={() => setFilterPanelOpen(false)} />
+            </div>
+          )}
+        </section>
+      )}
 
       <div className="hud-mono" style={{ fontSize: 12, color: 'var(--hud-ink-dim)', marginBottom: 12 }}>
         {loading ? 'LOADING...' : `${sorted.length} ITEMS / ${grouped.length} SETS`}

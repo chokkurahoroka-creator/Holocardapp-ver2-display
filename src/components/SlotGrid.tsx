@@ -88,8 +88,13 @@ export function SlotGrid({
               background: 'rgba(255,255,255,0.02)',
             }}
           >
-            <span className="hud-mono" style={{ fontSize: layout.compact ? 10 : 13, color: 'var(--hud-ink-dim)' }}>
-              No.{it.number}
+            {/* 空き枠の番号は大きく太字で表示する（「No.」は小さく添える） */}
+            <span
+              className="hud-mono"
+              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1.1, color: 'var(--hud-ink-dim)' }}
+            >
+              <span style={{ fontSize: layout.compact ? 9 : 12, opacity: 0.8 }}>No.</span>
+              <span style={{ fontSize: layout.compact ? 22 : 40, fontWeight: 800, color: 'var(--hud-ink)', opacity: 0.85 }}>{it.number}</span>
             </span>
           </div>
         )
