@@ -1,7 +1,8 @@
 import type { Card } from '../types/card'
 
-// 各カテゴリは複数選択可（カテゴリ内は常にOR）。カテゴリ間の組み合わせ方はlogicで選べる(AND/OR)。
-// HPだけは範囲指定（min/max、スライダー操作）
+// logicは「選択したすべての条件（チップ1つ1つ）」の組み合わせ方。
+// AND = 選んだ条件をすべて満たすカードだけ表示。OR = 選んだ条件のどれか1つでも満たせば表示。
+// （カテゴリ内だから自動的にOR、というグループ化はせず、文字通り選択した個々の値単位でAND/ORを切り替える）
 export type FilterLogic = 'and' | 'or'
 
 export type CardFilters = {
@@ -49,6 +50,11 @@ function sortJa(values: string[]): string[] {
   return values.slice().sort((a, b) => a.localeCompare(b, 'ja'))
 }
 
+// バトンタッチ未設定（null/undefined）のカードは0として扱う
+function batonTouchValue(c: Card): number {
+  return c.baton_touch_cost ?? 0
+}
+
 export function distinctSkillTypes(cards: Card[]): string[] {
   const set = new Set<string>()
   cards.forEach((c) => cardSkillTypes(c).forEach((t) => set.add(t)))
@@ -63,9 +69,7 @@ export function distinctTags(cards: Card[]): string[] {
 
 export function distinctBatonTouch(cards: Card[]): number[] {
   const set = new Set<number>()
-  cards.forEach((c) => {
-    if (c.baton_touch_cost !== null && c.baton_touch_cost !== undefined) set.add(c.baton_touch_cost)
-  })
+  cards.forEach((c) => set.add(batonTouchValue(c)))
   return Array.from(set).sort((a, b) => a - b)
 }
 
@@ -90,36 +94,30 @@ export function hpBounds(cards: Card[]): { min: number; max: number } {
   return { min, max: Math.max(max, min + 10) }
 }
 
-function matchesAny(selected: string[], value: string | null | undefined): boolean {
-  if (selected.length === 0) return true
-  return !!value && selected.includes(value)
-}
-
 function hpInRange(c: Card, filters: CardFilters): boolean {
-  if (!filters.hpMin && !filters.hpMax) return true
   if (c.hp === null || c.hp === undefined) return false
   if (filters.hpMin && c.hp < Number(filters.hpMin)) return false
   if (filters.hpMax && c.hp > Number(filters.hpMax)) return false
   return true
 }
 
-// カテゴリごとの一致判定を、アクティブなものだけ配列で返す（AND/ORの切り替えに使う）
-function activeCategoryChecks(c: Card, filters: CardFilters): boolean[] {
+// 選択された条件を、個々の値ごとに1つずつの判定関数として並べる（AND/ORはこの配列単位で適用する）
+function activeChecks(c: Card, filters: CardFilters): boolean[] {
   const checks: boolean[] = []
-  if (filters.skillTypes.length > 0) checks.push(cardSkillTypes(c).some((t) => filters.skillTypes.includes(t)))
+  filters.skillTypes.forEach((v) => checks.push(cardSkillTypes(c).includes(v)))
+  filters.tags.forEach((v) => checks.push(splitTags(c.tags).includes(v)))
+  filters.batonTouches.forEach((v) => checks.push(String(batonTouchValue(c)) === v))
+  filters.attributes.forEach((v) => checks.push(c.attribute === v))
+  filters.cardTypes.forEach((v) => checks.push(c.card_type === v))
+  filters.stages.forEach((v) => checks.push(c.stage === v))
+  filters.setCodes.forEach((v) => checks.push(c.set_code === v))
   if (filters.hpMin || filters.hpMax) checks.push(hpInRange(c, filters))
-  if (filters.tags.length > 0) checks.push(splitTags(c.tags).some((t) => filters.tags.includes(t)))
-  if (filters.batonTouches.length > 0) checks.push(filters.batonTouches.includes(String(c.baton_touch_cost ?? '')))
-  if (filters.attributes.length > 0) checks.push(matchesAny(filters.attributes, c.attribute))
-  if (filters.cardTypes.length > 0) checks.push(matchesAny(filters.cardTypes, c.card_type))
-  if (filters.stages.length > 0) checks.push(matchesAny(filters.stages, c.stage))
-  if (filters.setCodes.length > 0) checks.push(matchesAny(filters.setCodes, c.set_code))
   return checks
 }
 
 export function applyCardFilters(cards: Card[], filters: CardFilters): Card[] {
   return cards.filter((c) => {
-    const checks = activeCategoryChecks(c, filters)
+    const checks = activeChecks(c, filters)
     if (checks.length === 0) return true
     return filters.logic === 'or' ? checks.some(Boolean) : checks.every(Boolean)
   })

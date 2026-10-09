@@ -12,6 +12,7 @@ type Props = {
   selectionMode: boolean
   selectedIds: Set<number>
   onToggleSelect: (card: Card) => void
+  tileScale?: number // 右下の表示サイズ変更ボタンから渡される倍率（既定1）
 }
 
 export function SlotGrid({
@@ -24,6 +25,7 @@ export function SlotGrid({
   selectionMode,
   selectedIds,
   onToggleSelect,
+  tileScale = 1,
 }: Props) {
   // 通し番号（overall_number）でカードを引けるようにしておく。
   // 古いデータ等でoverall_numberが入っていないカードは配置スロット番号で代用する
@@ -46,7 +48,13 @@ export function SlotGrid({
   }
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12 }}>
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: `repeat(auto-fill, minmax(clamp(${Math.round(110 * tileScale)}px, 40vw, ${Math.round(160 * tileScale)}px), 1fr))`,
+        gap: 12,
+      }}
+    >
       {items.map((it) =>
         it.card ? (
           <CardTile
@@ -58,6 +66,7 @@ export function SlotGrid({
             selectionMode={selectionMode}
             selected={selectedIds.has(it.card.id)}
             onToggleSelect={onToggleSelect}
+            compact={tileScale < 0.75}
           />
         ) : (
           <div
@@ -73,7 +82,7 @@ export function SlotGrid({
               background: 'rgba(255,255,255,0.02)',
             }}
           >
-            <span className="hud-mono" style={{ fontSize: 13, color: 'var(--hud-ink-dim)' }}>
+            <span className="hud-mono" style={{ fontSize: tileScale < 0.75 ? 10 : 13, color: 'var(--hud-ink-dim)' }}>
               No.{it.number}
             </span>
           </div>

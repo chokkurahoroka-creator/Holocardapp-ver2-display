@@ -9,9 +9,10 @@ type Props = {
   selectionMode: boolean
   selected: boolean
   onToggleSelect: (card: Card) => void
+  compact?: boolean // 小さい表示サイズのとき、下部のテキスト情報を非表示にする
 }
 
-export function CardTile({ card, onClick, isFav, onToggleFav, selectionMode, selected, onToggleSelect }: Props) {
+export function CardTile({ card, onClick, isFav, onToggleFav, selectionMode, selected, onToggleSelect, compact = false }: Props) {
   const badgeColor = getRarityConfig(card.rarity).badgeColor
 
   return (
@@ -70,40 +71,42 @@ export function CardTile({ card, onClick, isFav, onToggleFav, selectionMode, sel
 
       <div style={{ padding: 6 }}>{card.image_url && renderRarityFrame(card.image_url, card.card_name, card.rarity)}</div>
 
-      <div style={{ padding: '2px 8px 8px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          {card.rarity && (
-            <span
-              className="hud-mono"
-              style={{
-                fontSize: 9,
-                fontWeight: 700,
-                lineHeight: 1.2,
-                padding: '0 4px',
-                borderRadius: 3,
-                border: `1px solid ${badgeColor}`,
-                color: badgeColor,
-                flexShrink: 0,
-              }}
-            >
-              {card.rarity}
-            </span>
-          )}
-          {card.card_type && (
-            <div
-              className="hud-mono"
-              style={{ fontSize: 10, color: 'var(--hud-ink-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-            >
-              {card.card_type}
-            </div>
-          )}
+      {!compact && (
+        <div style={{ padding: '2px 8px 8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            {card.rarity && (
+              <span
+                className="hud-mono"
+                style={{
+                  fontSize: 9,
+                  fontWeight: 700,
+                  lineHeight: 1.2,
+                  padding: '0 4px',
+                  borderRadius: 3,
+                  border: `1px solid ${badgeColor}`,
+                  color: badgeColor,
+                  flexShrink: 0,
+                }}
+              >
+                {card.rarity}
+              </span>
+            )}
+            {card.card_type && (
+              <div
+                className="hud-mono"
+                style={{ fontSize: 10, color: 'var(--hud-ink-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+              >
+                {card.card_type}
+              </div>
+            )}
+          </div>
+          <div style={{ fontSize: 13, fontWeight: 'bold', marginTop: 2, color: 'var(--hud-ink)' }}>{card.card_name}</div>
+          <div className="hud-mono" style={{ fontSize: 10, color: 'var(--hud-ink-dim)', marginTop: 2 }}>
+            {card.attribute ?? ''}
+            {card.hp ? ` / HP${card.hp}` : ''}
+          </div>
         </div>
-        <div style={{ fontSize: 13, fontWeight: 'bold', marginTop: 2, color: 'var(--hud-ink)' }}>{card.card_name}</div>
-        <div className="hud-mono" style={{ fontSize: 10, color: 'var(--hud-ink-dim)', marginTop: 2 }}>
-          {card.attribute ?? ''}
-          {card.hp ? ` / HP${card.hp}` : ''}
-        </div>
-      </div>
+      )}
     </div>
   )
 }

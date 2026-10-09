@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useSets } from '../hooks/useSets'
 import { useAllCards } from '../hooks/useAllCards'
 import { useCardSearch } from '../hooks/useCardSearch'
@@ -9,9 +9,11 @@ import { CardFilterPanel } from '../components/CardFilterPanel'
 import { CardModal } from '../components/CardModal'
 import { SiteNav } from '../components/SiteNav'
 import { FilterIcon } from '../components/FilterIcon'
+import { CardSizeControl, CARD_SIZE_DEFAULT } from '../components/CardSizeControl'
 import type { Card } from '../types/card'
 
 const EMPTY_SELECTION = new Set<number>()
+const CARD_SIZE_STORAGE_KEY = 'horoka-display:cardSize'
 
 function groupCardsBySet(cards: Card[], setNameByCode: Map<string, string>): { set_code: string; set_name: string; cards: Card[] }[] {
   const order: string[] = []
@@ -50,6 +52,15 @@ export function SearchPage() {
   const [filterPanelOpen, setFilterPanelOpen] = useState(false)
   const [navIndex, setNavIndex] = useState(-1)
 
+  // カード表示サイズ（右下の+/🔄/-ボタンで変更）。新カード一覧と設定を共有する
+  const [cardScale, setCardScale] = useState(() => {
+    const saved = localStorage.getItem(CARD_SIZE_STORAGE_KEY)
+    return saved ? Number(saved) : CARD_SIZE_DEFAULT
+  })
+  useEffect(() => {
+    localStorage.setItem(CARD_SIZE_STORAGE_KEY, String(cardScale))
+  }, [cardScale])
+
   const filteredByPanel = applyCardFilters(cards, filters)
   const searched = useCardSearch(filteredByPanel, searchQuery)
   const sorted = sortCards(searched, sortKey, sortDir)
@@ -65,10 +76,10 @@ export function SearchPage() {
   const currentCard = navIndex !== -1 ? sorted[navIndex] : null
 
   return (
-    <div style={{ padding: 20 }}>
+    <div style={{ padding: 'clamp(10px, 4vw, 20px)' }}>
       <SiteNav />
 
-      <section className="hud-panel" style={{ padding: 16, marginBottom: 20 }}>
+      <section className="hud-panel" style={{ padding: 'clamp(10px, 3vw, 16px)', marginBottom: 20 }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
           <input
             className="field"
@@ -102,7 +113,7 @@ export function SearchPage() {
 
         {filterPanelOpen && (
           <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--hud-line)' }}>
-            <CardFilterPanel cards={cards} filters={filters} onChange={setFilters} sets={sets} />
+            <CardFilterPanel cards={cards} filters={filters} onChange={setFilters} sets={sets} onClose={() => setFilterPanelOpen(false)} />
           </div>
         )}
       </section>
@@ -138,11 +149,13 @@ export function SearchPage() {
             selectionMode={false}
             selectedIds={EMPTY_SELECTION}
             onToggleSelect={() => {}}
+            tileScale={cardScale}
           />
         </div>
       ))}
 
       <CardModal card={currentCard} onClose={handleClose} onPrev={handlePrev} onNext={handleNext} hasNav={sorted.length > 1} onSelectCard={() => {}} />
+      <CardSizeControl scale={cardScale} onChange={setCardScale} />
     </div>
   )
-}
+}　

@@ -58,15 +58,16 @@ export function CardModal({ card, onClose, onPrev, onNext, hasNav, onSelectCard 
         alignItems: 'center',
         justifyContent: 'center',
         zIndex: 1000,
-        padding: 16,
+        // 狭い画面では外側の余白を減らし、カード内容に使える幅を広くする
+        padding: 'clamp(4px, 2vw, 16px)',
       }}
     >
       {/* 外枠：角カットのHUDパネル（ここはスクロールさせない） */}
       <div
         className="hud-panel"
         style={{
-          width: 'min(94vw, 1000px)',
-          maxHeight: '92vh',
+          width: 'min(96vw, 1000px)',
+          maxHeight: '94vh',
           display: 'flex',
           flexDirection: 'column',
           color: 'var(--hud-ink)',
@@ -92,8 +93,9 @@ export function CardModal({ card, onClose, onPrev, onNext, hasNav, onSelectCard 
           </>
         )}
 
-        {/* 中身：実際にスクロールする領域 */}
-        <div style={{ overflowY: 'auto', padding: '28px 56px 24px' }}>
+        {/* 中身：実際にスクロールする領域。左右の余白はclamp()でビューポート幅に応じて縮める
+            （固定56pxのままだと狭いスマホ画面でコンテンツ幅を圧迫しすぎるため） */}
+        <div style={{ overflowY: 'auto', padding: 'clamp(16px, 6vw, 28px) clamp(16px, 10vw, 56px) 24px' }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24 }}>
             <div style={{ flexShrink: 0, width: 240, maxWidth: '100%' }} className="group">
               {card.image_url && renderRarityFrame(card.image_url, card.card_name, card.rarity)}

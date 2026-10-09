@@ -16,9 +16,11 @@ import { useFavorites } from '../hooks/useFavorites'
 import { downloadCardsAsZip } from '../lib/download'
 import { logEvent, logDownloadEvents } from '../lib/logEvent'
 import { SiteNav } from '../components/SiteNav'
+import { CardSizeControl, CARD_SIZE_DEFAULT } from '../components/CardSizeControl'
 
 const THIS_PAGE_KEY = 'display'
 const STORAGE_KEY = 'horoka-display:display:setCode'
+const CARD_SIZE_STORAGE_KEY = 'horoka-display:cardSize'
 
 // 新規・再録・パラレルの順で、それぞれの枠を分けてグループ化する（枠内の並び順はsortedの順序のまま維持）
 const TYPE_ORDER: Card['type'][] = ['新規', '再録', 'パラレル']
@@ -38,6 +40,15 @@ export function DisplayPage() {
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [filters, setFilters] = useState<CardFilters>(EMPTY_FILTERS)
   const [filterPanelOpen, setFilterPanelOpen] = useState(false)
+
+  // カード表示サイズ（右下の+/🔄/-ボタンで変更）。端末ごとに前回の設定を覚えておく
+  const [cardScale, setCardScale] = useState(() => {
+    const saved = localStorage.getItem(CARD_SIZE_STORAGE_KEY)
+    return saved ? Number(saved) : CARD_SIZE_DEFAULT
+  })
+  useEffect(() => {
+    localStorage.setItem(CARD_SIZE_STORAGE_KEY, String(cardScale))
+  }, [cardScale])
 
   // 弾を切り替えたら、別の弾の選択肢が残らないようフィルターをリセットする
   useEffect(() => {
@@ -161,13 +172,25 @@ export function DisplayPage() {
   return (
     <>
       {isMaintenance && <MaintenanceBanner position="top" />}
-      <div style={{ padding: 20, marginTop: isMaintenance ? 28 : 0, marginBottom: isMaintenance ? 28 : 0, paddingBottom: selectionMode ? 90 : 20 }}>
+      <div
+        style={{
+          padding: 'clamp(10px, 4vw, 20px)',
+          marginTop: isMaintenance ? 28 : 0,
+          marginBottom: isMaintenance ? 28 : 0,
+          paddingBottom: selectionMode ? 90 : 'clamp(10px, 4vw, 20px)',
+        }}
+      >
         <SiteNav />
 
         {/* 操作パネル */}
-        <section className="hud-panel" style={{ padding: 16, marginBottom: 20 }}>
+        <section className="hud-panel" style={{ padding: 'clamp(10px, 3vw, 16px)', marginBottom: 20 }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
-            <select className="field hud-mono" value={setCode ?? ''} onChange={(e) => setSetCode(e.target.value || null)}>
+            <select
+              className="field hud-mono"
+              value={setCode ?? ''}
+              onChange={(e) => setSetCode(e.target.value || null)}
+              style={{ maxWidth: '100%', width: 'clamp(140px, 60vw, 260px)' }}
+            >
               <option value="">弾を選択してください</option>
               {visibleSets.map((s) => (
                 <option key={s.set_code} value={s.set_code}>
@@ -242,7 +265,7 @@ export function DisplayPage() {
           {/* 絞り込みフィルター（フィルターボタンを押したときだけ表示） */}
           {filterPanelOpen && (
             <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--hud-line)' }}>
-              <CardFilterPanel cards={cards} filters={filters} onChange={setFilters} />
+              <CardFilterPanel cards={cards} filters={filters} onChange={setFilters} onClose={() => setFilterPanelOpen(false)} />
             </div>
           )}
         </section>
@@ -289,6 +312,7 @@ export function DisplayPage() {
                       selectionMode={selectionMode}
                       selectedIds={selectedIds}
                       onToggleSelect={handleToggleSelect}
+                      tileScale={cardScale}
                     />
                   </div>
                 )
@@ -320,6 +344,7 @@ export function DisplayPage() {
                   selectionMode={selectionMode}
                   selectedIds={selectedIds}
                   onToggleSelect={handleToggleSelect}
+                  tileScale={cardScale}
                 />
               </div>
             ))}
@@ -343,7 +368,7 @@ export function DisplayPage() {
             bottom: isMaintenance ? 28 : 0,
             background: 'var(--hud-panel)',
             borderTop: '1px solid var(--hud-cyan)',
-            padding: '10px 20px',
+            padding: '10px clamp(10px, 4vw, 20px)',
             display: 'flex',
             alignItems: 'center',
             gap: 12,
@@ -366,6 +391,7 @@ export function DisplayPage() {
       )}
 
       {isMaintenance && <MaintenanceBanner position="bottom" />}
+      <CardSizeControl scale={cardScale} onChange={setCardScale} />
     </>
   )
 }
