@@ -8,6 +8,7 @@ import { ArtsSkillsView } from './ArtsSkillsView'
 import { downloadCardImage } from '../lib/download'
 import { logEvent } from '../lib/logEvent'
 import { useIsMobile } from '../hooks/useGridLayout'
+import { YellRow } from './YellIcon'
 import { getRarityConfig, renderRarityFrame } from '../utils/rarityFrame'
 
 type Props = {
@@ -241,8 +242,14 @@ export function CardModal({ card, onClose, onPrev, onNext, hasNav, onSelectCard 
 
               {/* バトンタッチはアーツの下 */}
               {card.baton_touch_cost !== null && card.baton_touch_cost !== undefined && (
-                <div className="hud-mono" style={{ marginTop: 4, fontSize: 14, lineHeight: 1.8, color: 'var(--hud-ink-dim)' }}>
-                  バトンタッチ: <span style={{ color: 'var(--hud-ink)' }}>{card.baton_touch_cost}</span>
+                <div className="hud-mono" style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 14, color: 'var(--hud-ink-dim)' }}>
+                  <span>バトンタッチ</span>
+                  {/* バトンタッチのコストは、数に応じて無色エールの画像を横に並べる */}
+                  {Number(card.baton_touch_cost) > 0 ? (
+                    <YellRow items={[{ color: '無色', count: Number(card.baton_touch_cost) }]} size={isMobile ? 24 : 30} />
+                  ) : (
+                    <span style={{ color: 'var(--hud-ink)' }}>なし</span>
+                  )}
                 </div>
               )}
 

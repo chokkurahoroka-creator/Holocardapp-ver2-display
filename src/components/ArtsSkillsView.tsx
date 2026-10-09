@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react'
 import type { Card } from '../types/card'
 import { useIsMobile } from '../hooks/useGridLayout'
+import { SkillBanner, YellRow, hasSkillBanner } from './YellIcon'
 
 type YellCost = { color: string; count: number }
 type ArtRow = {
@@ -58,33 +59,6 @@ function HighlightNumbers({ text, color = '#ffd76a', glow = false }: { text: str
 const EXTRA_SKILL_TYPE = 'エクストラ'
 const GOLD = '#ffc83d'
 
-function YellDots({ cost }: { cost: YellCost[] }) {
-  const dots: { color: string; key: string }[] = []
-  cost.forEach((y, yi) => {
-    const n = Math.max(0, Math.min(10, Number(y.count) || 0))
-    for (let i = 0; i < n; i++) dots.push({ color: y.color, key: `${yi}-${i}` })
-  })
-  if (!dots.length) return null
-  return (
-    <span style={{ display: 'inline-flex', gap: 3, alignItems: 'center' }} aria-label="エールコスト">
-      {dots.map((d) => (
-        <span
-          key={d.key}
-          title={d.color}
-          style={{
-            width: 14,
-            height: 14,
-            borderRadius: '50%',
-            background: YELL_COLOR_MAP[d.color] ?? '#9aa5a8',
-            border: '1px solid rgba(255,255,255,0.35)',
-            display: 'inline-block',
-          }}
-        />
-      ))}
-    </span>
-  )
-}
-
 const blockBase: CSSProperties = {
   borderRadius: 8,
   padding: '10px 12px', // PCでは下でさらに広げる
@@ -109,6 +83,8 @@ export function ArtsSkillsView({ card }: Props) {
   const damageSize = isMobile ? 16 : 22
   const sectionLabelSize = isMobile ? 13 : 15
   const badgeSize = isMobile ? 10 : 12
+  const yellSize = isMobile ? 24 : 30 // アーツに必要なエール画像の大きさ
+  const bannerHeight = isMobile ? 28 : 38 // スキル種別バナー画像の高さ
   const skills = ((card.skills_json ?? []) as SkillRow[]).filter((s) => s && (s.title || s.text))
   const arts = ((card.arts_json ?? []) as ArtRow[]).filter((a) => a && (a.name || a.effectText || a.damage))
 
@@ -137,7 +113,9 @@ export function ArtsSkillsView({ card }: Props) {
               }}
             >
               <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: s.text ? 4 : 0 }}>
-                {s.skillType && s.skillType !== 'ー' && (
+                {/* ギフト・コラボエフェクト・ブルームエフェクトはバナー画像、それ以外（エクストラなど）は文字バッジ */}
+                {hasSkillBanner(s.skillType) && <SkillBanner skillType={s.skillType!} height={bannerHeight} />}
+                {s.skillType && s.skillType !== 'ー' && !hasSkillBanner(s.skillType) && (
                   <span
                     className="hud-mono"
                     style={{ fontSize: badgeSize, fontWeight: isMobile ? 400 : 700, color: accent, border: `1px solid ${isExtra ? 'rgba(255,200,61,0.7)' : 'rgba(100,181,246,0.6)'}`, borderRadius: 4, padding: '1px 6px' }}
@@ -188,7 +166,7 @@ export function ArtsSkillsView({ card }: Props) {
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                {a.yellCost && a.yellCost.length > 0 && <YellDots cost={a.yellCost} />}
+                {a.yellCost && a.yellCost.length > 0 && <YellRow items={a.yellCost} size={yellSize} />}
                 {a.name && (
                   <span className="hud-font" style={{ fontSize: titleSize, fontWeight: titleWeight, color: '#fff' }}>
                     {a.name}

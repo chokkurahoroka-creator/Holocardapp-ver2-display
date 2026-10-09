@@ -62,7 +62,10 @@ export function DisplayPage() {
 
   const filteredByPanel = applyCardFilters(cards, filters)
   const searched = useCardSearch(filteredByPanel, searchQuery)
-  const sorted = sortCards(searched, sortKey, sortDir)
+  // 枠番号順は昇順固定（昇降順ボタンは無効）。降順の状態が残っていても、枠番号順では昇順で並べる
+  const slotSort = sortKey === 'slot'
+  const effectiveSortDir: SortDir = slotSort ? 'asc' : sortDir
+  const sorted = sortCards(searched, sortKey, effectiveSortDir)
   const groupedByType = groupCardsByType(sorted)
 
   // パック選択リストは、管理画面で「公開中」に設定されている弾だけを、名前順で表示する
@@ -213,8 +216,14 @@ export function DisplayPage() {
             <option value="name">カード名順</option>
             <option value="hp">HP順</option>
           </select>
-          <button className="btn-secondary" onClick={() => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')}>
-            {sortDir === 'asc' ? '昇順 ▲' : '降順 ▼'}
+          <button
+            className="btn-secondary"
+            onClick={() => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')}
+            disabled={slotSort}
+            title={slotSort ? '枠番号順では昇降順を切り替えられません' : undefined}
+            style={slotSort ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
+          >
+            {effectiveSortDir === 'asc' ? '昇順 ▲' : '降順 ▼'}
           </button>
         </ControlsBar>
 
@@ -358,6 +367,7 @@ export function DisplayPage() {
                   selectedIds={selectedIds}
                   onToggleSelect={handleToggleSelect}
                   tileScale={cardScale}
+                  sortKey={sortKey}
                 />
               </div>
             ))}

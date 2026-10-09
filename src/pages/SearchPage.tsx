@@ -162,6 +162,7 @@ export function SearchPage() {
             selectedIds={EMPTY_SELECTION}
             onToggleSelect={() => {}}
             tileScale={cardScale}
+            sortKey={sortKey}
           />
         </div>
       ))}

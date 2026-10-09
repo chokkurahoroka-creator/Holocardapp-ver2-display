@@ -1,0 +1,44 @@
+/* レア度ごとの白い光の斜線。カードにホバーしている間だけ、左端の外から現れ、右端の外へ抜けて消えるまでを繰り返す。
+   移動量・角度はrarityFrame.tsxからCSS変数で渡される（--sweep-start / --sweep-end / --sweep-angle） */
+   @keyframes rarity-sweep-move {
+    0% {
+      transform: translateX(var(--sweep-start)) rotate(var(--sweep-angle));
+      opacity: 0;
+    }
+    4% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 1;
+    }
+    56% {
+      transform: translateX(var(--sweep-end)) rotate(var(--sweep-angle));
+      opacity: 0;
+    }
+    100% {
+      transform: translateX(var(--sweep-end)) rotate(var(--sweep-angle));
+      opacity: 0;
+    }
+  }
+  
+  /* ホバーしていない間は動かさず、斜線は見えない状態（opacity:0）のまま。
+     .group は親（カードタイル等）、.rarity-frame は画像の枠自身へのホバー */
+  .rarity-sweep {
+    animation: none;
+  }
+  
+  .group:hover .rarity-sweep,
+  .rarity-frame:hover .rarity-sweep {
+    animation-name: rarity-sweep-move;
+    animation-timing-function: cubic-bezier(0.4, 0, 0.6, 1);
+    animation-iteration-count: infinite;
+    will-change: transform, opacity;
+  }
+  
+  /* OSの「視差効果を減らす」設定では動かさない */
+  @media (prefers-reduced-motion: reduce) {
+    .rarity-sweep {
+      animation: none;
+      opacity: 0 !important;
+    }
+  }
