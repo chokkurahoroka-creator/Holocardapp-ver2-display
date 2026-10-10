@@ -164,6 +164,7 @@ export function SearchPage() {
           onToggleSelect={() => {}}
           tileScale={cardScale}
           sortKey={sortKey}
+          groupWithSet
         />
       ) : (
         <>

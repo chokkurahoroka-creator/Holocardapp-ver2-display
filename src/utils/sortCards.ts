@@ -114,8 +114,12 @@ function nameGroupLabel(name: string | null): string {
   return 'その他（漢字など）'
 }
 
-// 並び替えキーに応じた「区切りの見出し」。枠番号順・通し番号順は区切り不要なので null
-export function getSortGroupLabel(card: Card, key: SortKey): string | null {
+// 並び替えキーに応じた「区切りの見出し」。
+// カード番号順（overall）は、新規・再録・パラレルの区分ごとに区切る。パックをまたいでまとめて表示するとき
+// （withSet）は、パックが変わった所にも区切りが入るよう、見出しにパックの弾コードも付ける。
+// 枠番号順は区切り不要なので null
+export function getSortGroupLabel(card: Card, key: SortKey, opts?: { withSet?: boolean }): string | null {
+  if (key === 'overall') return `${opts?.withSet ? `${card.set_code} ` : ''}${card.type}`
   if (key === 'rarity') {
     const r = (card.rarity || '').toUpperCase().trim()
     return r ? `レアリティ ${r}` : 'レアリティなし'

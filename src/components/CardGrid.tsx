@@ -12,7 +12,8 @@ type Props = {
   selectedIds: Set<number>
   onToggleSelect: (card: Card) => void
   tileScale?: number // 右下の表示サイズ変更ボタンから渡される倍率（既定1）
-  sortKey?: SortKey // 並び替えキー。レアリティ・HP・カード名順のときは、区切りの見出しを入れる
+  sortKey?: SortKey // 並び替えキー。レアリティ・HP・カード名・カード番号順のときは、区切りの見出しを入れる
+  groupWithSet?: boolean // カード番号順で、パックをまたいでまとめて表示するとき、見出しに弾コードも付ける
 }
 
 // 区切り線に付けるタグの短い文字（「レアリティ SR」→「SR」、「HP 90」→「HP90」、「その他（漢字など）」→「他」）
@@ -23,7 +24,7 @@ function chipText(label: string): string {
     .replace(/^その他（漢字など）$/, '他')
 }
 
-export function CardGrid({ cards, onCardClick, isFav, onToggleFav, selectionMode, selectedIds, onToggleSelect, tileScale = 1, sortKey }: Props) {
+export function CardGrid({ cards, onCardClick, isFav, onToggleFav, selectionMode, selectedIds, onToggleSelect, tileScale = 1, sortKey, groupWithSet }: Props) {
   // PCは最小タイル幅ベースの自動列数、スマホは倍率1で4列（詳細はuseGridLayout）
   const layout = useGridLayout(tileScale)
   return (
@@ -36,8 +37,8 @@ export function CardGrid({ cards, onCardClick, isFav, onToggleFav, selectionMode
     >
       {cards.map((card, index) => {
         // 並び替えの区切り: 前のカードと見出しが変わったカードの左側（カードとカードの間）に縦の区切り線を引く
-        const label = sortKey ? getSortGroupLabel(card, sortKey) : null
-        const prevLabel = sortKey && index > 0 ? getSortGroupLabel(cards[index - 1]!, sortKey) : null
+        const label = sortKey ? getSortGroupLabel(card, sortKey, { withSet: groupWithSet }) : null
+        const prevLabel = sortKey && index > 0 ? getSortGroupLabel(cards[index - 1]!, sortKey, { withSet: groupWithSet }) : null
         const startsGroup = label !== null && (index === 0 || label !== prevLabel)
         return (
           <div key={card.id} style={{ position: 'relative' }}>
@@ -66,11 +67,11 @@ export function CardGrid({ cards, onCardClick, isFav, onToggleFav, selectionMode
                     top: '50%',
                     left: '50%',
                     transform: 'translate(-50%, -50%)',
-                    padding: layout.compact ? '1px 3px' : '2px 5px',
-                    borderRadius: 4,
+                    padding: layout.compact ? '2px 5px' : '3px 8px',
+                    borderRadius: 5,
                     background: 'var(--hud-cyan)',
                     color: '#04232a',
-                    fontSize: layout.compact ? 9 : 11,
+                    fontSize: layout.compact ? 12 : 16,
                     fontWeight: 800,
                     lineHeight: 1.1,
                     whiteSpace: 'nowrap',
