@@ -89,6 +89,12 @@ export async function fetchAllCards(setCode?: string): Promise<Card[]> {
   return fetchLeanOrFull(setCode ? (q) => q.eq('set_code', setCode) : undefined)
 }
 
+// 複数のパックのカードをまとめて取得（パックセットの表示用）
+export async function fetchCardsBySets(setCodes: string[]): Promise<Card[]> {
+  if (setCodes.length === 0) return []
+  return fetchLeanOrFull((q) => q.in('set_code', setCodes))
+}
+
 // 最新の更新日時と総枚数（1行だけの軽いリクエスト）
 async function fetchHead(): Promise<{ latest: string; count: number }> {
   const { data, error, count } = await supabase

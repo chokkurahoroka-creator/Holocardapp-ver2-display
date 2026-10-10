@@ -24,6 +24,7 @@ export type Card = {
   overall_number: number | null
   timestamp: string
   updated_at?: string
+  original_number?: string | null // 再録・パラレルの元カードの番号（再録パックでカード番号がずれるため、元の番号を別に持つ）
   // 一覧用の軽量データ（cards_listビュー）から作ったカードのとき true。
   // アーツ・固有スキル・評価（arts_json/skills_json/rating_json/rating_comment）は空で、詳細モーダルを開いたときに取得する
   lean?: boolean
@@ -41,4 +42,11 @@ export type SetInfo = {
   pack_image_url: string | null
   status: string
   default_flag: boolean
+  pack_set_id?: number | null // 所属するパックセット（pack_sets.id）。未所属は null
+}
+
+// 複数のパックをひとまとまりにして表示するためのパックセット
+export type PackSet = {
+  id: number
+  name: string
 }

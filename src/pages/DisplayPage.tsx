@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useSets } from '../hooks/useSets'
-import { useCards } from '../hooks/useCards'
+import { useCardsBySets } from '../hooks/useCardsBySets'
+import { usePackSets } from '../hooks/usePackSets'
+import { buildPackGroups, resolveGroupKey } from '../utils/packGroups'
 import { useCardSearch } from '../hooks/useCardSearch'
 import { useSiteStatus } from '../hooks/useSiteStatus'
 import { sortCards, type SortKey, type SortDir } from '../utils/sortCards'
@@ -32,8 +34,19 @@ function groupCardsByType(cards: Card[]): { type: Card['type']; cards: Card[] }[
 
 export function DisplayPage() {
   const { sets } = useSets()
-  const [setCode, setSetCode] = useState<string | null>(() => localStorage.getItem(STORAGE_KEY))
-  const { cards, loading } = useCards(setCode)
+  const { packSets } = usePackSets()
+  // 選択中の「パックセット（または単独パック）」。以前の版では弾コードを保存していたため、保存値は弾コードでも受け付ける
+  const [groupKey, setGroupKey] = useState<string | null>(() => localStorage.getItem(STORAGE_KEY))
+  // パック選択リストは、管理画面で「公開中」に設定されているパックだけを、パックセットごとにまとめて表示する
+  const groups = buildPackGroups(sets, packSets, { onlyPublic: true })
+  const activeKey = resolveGroupKey(groupKey, groups)
+  const group = groups.find((g) => g.key === activeKey) ?? null
+  // 空き枠・設定枚数は、グループの代表パック（弾コードが最小のパック）の設定で表示する。追加パックのカードは続けて並べる
+  const setInfo = group?.sets[0]
+  const setCode = setInfo?.set_code ?? null
+  const extraSets = group ? group.sets.slice(1) : []
+  const memberCodes = group ? group.sets.map((s) => s.set_code) : []
+  const { cards, loading } = useCardsBySets(memberCodes)
   const { status: siteStatus } = useSiteStatus()
   const isMaintenance = siteStatus[THIS_PAGE_KEY] === '作業中'
 
@@ -58,7 +71,7 @@ export function DisplayPage() {
   // 弾を切り替えたら、別の弾の選択肢が残らないようフィルターをリセットする
   useEffect(() => {
     setFilters(EMPTY_FILTERS)
-  }, [setCode])
+  }, [activeKey])
 
   const filteredByPanel = applyCardFilters(cards, filters)
   const searched = useCardSearch(filteredByPanel, searchQuery)
@@ -68,14 +81,7 @@ export function DisplayPage() {
   const sorted = sortCards(searched, sortKey, effectiveSortDir)
   const groupedByType = groupCardsByType(sorted)
 
-  // パック選択リストは、管理画面で「公開中」に設定されている弾だけを、名前順で表示する
-  const visibleSets = sets
-    .filter((s) => s.status === '公開中')
-    .slice()
-    .sort((a, b) => a.set_name.localeCompare(b.set_name, 'ja'))
-
   // 空き枠は区分ごとのスロット番号（slot）で1〜設定枚数まで表示する（通し番号は使わない）
-  const setInfo = sets.find((s) => s.set_code === setCode)
   // 検索中や、枠番号順以外の並び替えをしているときは「空いている枠」の概念がそのままでは意味を持たないため、
   // 検索なし・枠番号順のときだけ空き枠を表示する
   const showEmptySlots = !searchQuery.trim() && !hasActiveFilters(filters) && sortKey === 'slot' && !!setInfo
@@ -88,15 +94,17 @@ export function DisplayPage() {
     : []
 
   // 詳細モーダルの前へ/次へで辿る順序。一覧に表示されている並び（区分ごとのまとまり・並べ替え後の順）そのままにする
+  const bySlot = (a: Card, b: Card) => Number(a.slot) - Number(b.slot)
+  const primaryCardsOf = (type: Card['type']) => cards.filter((c) => c.type === type && c.set_code === setCode)
+  // 追加パックのカード（パックの順 → スロット番号順）。カードの無いパックは除く
+  const extraPacksOf = (type: Card['type']) =>
+    extraSets
+      .map((s) => ({ set: s, cards: cards.filter((c) => c.type === type && c.set_code === s.set_code).sort(bySlot) }))
+      .filter((x) => x.cards.length > 0)
   const navCards: Card[] = showEmptySlots
     ? slotTypeConfig
         .filter((tc) => tc.count > 0 || cards.some((c) => c.type === tc.type))
-        .flatMap((tc) =>
-          orderSlotCards(
-            cards.filter((c) => c.type === tc.type),
-            tc.count
-          )
-        )
+        .flatMap((tc) => [...orderSlotCards(primaryCardsOf(tc.type), tc.count), ...extraPacksOf(tc.type).flatMap((x) => x.cards)])
     : groupedByType.flatMap((g) => g.cards)
 
   const [navIndex, setNavIndex] = useState(-1)
@@ -108,9 +116,14 @@ export function DisplayPage() {
 
   // ----- 選択中の弾を保存し、次回このページを開いたときも引き継ぐ -----
   useEffect(() => {
-    if (setCode) localStorage.setItem(STORAGE_KEY, setCode)
+    if (groupKey) localStorage.setItem(STORAGE_KEY, groupKey)
     else localStorage.removeItem(STORAGE_KEY)
-  }, [setCode])
+  }, [groupKey])
+
+  // 以前の版で保存された弾コードを、パックセット/グループのキーに置き換えておく
+  useEffect(() => {
+    if (activeKey && groupKey !== activeKey) setGroupKey(activeKey)
+  }, [activeKey, groupKey])
 
   // ----- 検索ログ：入力が止まって600ms経ったら記録（デバウンス） -----
   useEffect(() => {
@@ -208,7 +221,7 @@ export function DisplayPage() {
           onToggle={() => setControlsOpen((v) => !v)}
           active={!!searchQuery.trim() || hasActiveFilters(filters)}
         >
-          <PackSelect sets={visibleSets} value={setCode} onChange={setSetCode} />
+          <PackSelect groups={groups} value={activeKey} onChange={setGroupKey} />
 
           <select className="field" value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
             <option value="slot">枠番号順</option>
@@ -305,6 +318,7 @@ export function DisplayPage() {
               .filter((tc) => tc.count > 0 || cards.some((c) => c.type === tc.type))
               .map((tc) => {
                 const typeCards = cards.filter((c) => c.type === tc.type)
+                const extraPacks = extraPacksOf(tc.type)
                 return (
                   <div key={tc.type} style={{ marginBottom: 28 }}>
                     <h3
@@ -326,7 +340,7 @@ export function DisplayPage() {
                       </span>
                     </h3>
                     <SlotGrid
-                      cards={typeCards}
+                      cards={primaryCardsOf(tc.type)}
                       count={tc.count}
                       onCardClick={handleCardClick}
                       isFav={(c) => isFav(c, activeGroup)}
@@ -336,6 +350,26 @@ export function DisplayPage() {
                       onToggleSelect={handleToggleSelect}
                       tileScale={cardScale}
                     />
+
+                    {/* パックセットの追加パック（再販など）のカード。代表パックの枠の後ろに、パックごとに続けて表示する */}
+                    {extraPacks.map((x) => (
+                      <div key={x.set.set_code} style={{ marginTop: 16 }}>
+                        <div className="hud-mono" style={{ fontSize: 12, color: 'var(--hud-cyan)', marginBottom: 8 }}>
+                          ▶ {x.set.set_code}（{x.set.set_name}）
+                          <span style={{ marginLeft: 8, color: 'var(--hud-ink-dim)' }}>{x.cards.length} ITEMS</span>
+                        </div>
+                        <CardGrid
+                          cards={x.cards}
+                          onCardClick={handleCardClick}
+                          isFav={(c) => isFav(c, activeGroup)}
+                          onToggleFav={handleToggleFav}
+                          selectionMode={selectionMode}
+                          selectedIds={selectedIds}
+                          onToggleSelect={handleToggleSelect}
+                          tileScale={cardScale}
+                        />
+                      </div>
+                    ))}
                   </div>
                 )
               })

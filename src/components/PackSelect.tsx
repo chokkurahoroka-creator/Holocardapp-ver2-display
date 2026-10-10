@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import type { SetInfo } from '../types/card'
+import type { PackGroup } from '../utils/packGroups'
 
 type Props = {
-  sets: SetInfo[] // 選択肢にする弾（公開中のものだけを渡す）
-  value: string | null
-  onChange: (setCode: string | null) => void
+  groups: PackGroup[] // 選択肢にするグループ（パックセット、またはパックセットに入っていない単独パック）
+  value: string | null // 選択中のグループのキー
+  onChange: (groupKey: string | null) => void
 }
 
 // パックのアイコン。画像が無い弾は空の枠を出して、行の高さ・文字位置が揃うようにする
@@ -33,10 +33,10 @@ function PackIcon({ url, size }: { url: string | null; size: number }) {
 
 // 弾の選択（パック名の前にアイコン画像を表示する）。
 // <select>の<option>には画像を入れられないため、ボタン＋一覧の自前ドロップダウンにしている
-export function PackSelect({ sets, value, onChange }: Props) {
+export function PackSelect({ groups, value, onChange }: Props) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
-  const selected = sets.find((s) => s.set_code === value) ?? null
+  const selected = groups.find((g) => g.key === value) ?? null
 
   // 外側のクリック/タップ、Escapeで閉じる
   useEffect(() => {
@@ -55,8 +55,8 @@ export function PackSelect({ sets, value, onChange }: Props) {
     }
   }, [open])
 
-  const choose = (code: string | null) => {
-    onChange(code)
+  const choose = (key: string | null) => {
+    onChange(key)
     setOpen(false)
   }
 
@@ -86,9 +86,9 @@ export function PackSelect({ sets, value, onChange }: Props) {
         aria-expanded={open}
         style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', cursor: 'pointer' }}
       >
-        {selected && <PackIcon url={selected.pack_image_url} size={22} />}
+        {selected && <PackIcon url={selected.imageUrl} size={22} />}
         <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {selected ? `${selected.set_code}（${selected.set_name}）` : '弾を選択してください'}
+          {selected ? selected.name : '弾を選択してください'}
         </span>
         <span style={{ fontSize: 10, color: 'var(--hud-cyan)' }}>{open ? '▲' : '▼'}</span>
       </button>
@@ -115,19 +115,24 @@ export function PackSelect({ sets, value, onChange }: Props) {
             <PackIcon url={null} size={34} />
             弾を選択してください
           </button>
-          {sets.map((s) => (
+          {groups.map((g) => (
             <button
-              key={s.set_code}
+              key={g.key}
               type="button"
               role="option"
-              aria-selected={s.set_code === value}
-              onClick={() => choose(s.set_code)}
+              aria-selected={g.key === value}
+              onClick={() => choose(g.key)}
               className="hud-mono"
-              style={rowStyle(s.set_code === value)}
+              style={rowStyle(g.key === value)}
             >
-              <PackIcon url={s.pack_image_url} size={34} />
+              <PackIcon url={g.imageUrl} size={34} />
               <span style={{ flex: 1, minWidth: 0 }}>
-                {s.set_code}（{s.set_name}）
+                {g.name}
+                {g.sets.length > 1 && (
+                  <span style={{ display: 'block', fontSize: 11, color: 'var(--hud-ink-dim)' }}>
+                    {g.sets.map((s) => s.set_code).join(' / ')}
+                  </span>
+                )}
               </span>
             </button>
           ))}

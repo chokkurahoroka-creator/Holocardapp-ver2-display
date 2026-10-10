@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useSets } from '../hooks/useSets'
+import { usePackSets } from '../hooks/usePackSets'
+import { groupInfoBySetCode } from '../utils/packGroups'
 import { useAllCards } from '../hooks/useAllCards'
 import { useCardSearch } from '../hooks/useCardSearch'
 import { sortCards, type SortKey, type SortDir } from '../utils/sortCards'
@@ -17,23 +19,26 @@ import type { Card } from '../types/card'
 const EMPTY_SELECTION = new Set<number>()
 const CARD_SIZE_STORAGE_KEY = 'horoka-display:cardSize'
 
-function groupCardsBySet(cards: Card[], setNameByCode: Map<string, string>): { set_code: string; set_name: string; cards: Card[] }[] {
-  const order: string[] = []
-  const byCode = new Map<string, Card[]>()
+// パックセットごと（パックセットに入っていないパックは、そのパックごと）に区切ってまとめる。
+// カードの並び順は維持し、区切りの順番は、含まれるパックの弾コードが小さい順にする
+function groupCardsByPackGroup(
+  cards: Card[],
+  info: Map<string, { key: string; name: string }>
+): { key: string; name: string; cards: Card[] }[] {
+  const byKey = new Map<string, { key: string; name: string; cards: Card[]; minCode: string }>()
   cards.forEach((c) => {
-    if (!byCode.has(c.set_code)) {
-      byCode.set(c.set_code, [])
-      order.push(c.set_code)
+    const g = info.get(c.set_code) ?? { key: c.set_code, name: c.set_code }
+    const existing = byKey.get(g.key)
+    if (existing) {
+      existing.cards.push(c)
+      if (c.set_code.localeCompare(existing.minCode, undefined, { numeric: true }) < 0) existing.minCode = c.set_code
+    } else {
+      byKey.set(g.key, { key: g.key, name: g.name, cards: [c], minCode: c.set_code })
     }
-    byCode.get(c.set_code)!.push(c)
   })
-  return order
-    .map((set_code) => ({
-      set_code,
-      set_name: setNameByCode.get(set_code) ?? set_code,
-      cards: byCode.get(set_code)!,
-    }))
-    .sort((a, b) => a.set_code.localeCompare(b.set_code))
+  return Array.from(byKey.values())
+    .sort((a, b) => a.minCode.localeCompare(b.minCode, undefined, { numeric: true }))
+    .map(({ key, name, cards: groupCards }) => ({ key, name, cards: groupCards }))
 }
 
 export function SearchPage() {
@@ -41,7 +46,8 @@ export function SearchPage() {
   const { cards, loading } = useAllCards()
 
   // 全カード検索は「新カード一覧」の公開/非公開設定とは関係なく、登録済みの全弾を対象にする
-  const setNameByCode = new Map(sets.map((s) => [s.set_code, s.set_name]))
+  const { packSets } = usePackSets()
+  const packGroupInfo = groupInfoBySetCode(sets, packSets)
 
   const [searchQuery, setSearchQuery] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('overall')
@@ -73,7 +79,7 @@ export function SearchPage() {
   const filteredByPanel = applyCardFilters(cards, filters)
   const searched = useCardSearch(filteredByPanel, searchQuery)
   const sorted = sortCards(searched, sortKey, sortDir)
-  const grouped = groupCardsBySet(sorted, setNameByCode)
+  const grouped = groupCardsByPackGroup(sorted, packGroupInfo)
   // 詳細モーダルの前へ/次へで辿る順序。一覧に表示されている並び（弾ごとのまとまり・並べ替え後の順）そのままにする
   const navCards = mergePacks ? sorted : grouped.flatMap((g) => g.cards)
 
@@ -169,7 +175,7 @@ export function SearchPage() {
       ) : (
         <>
       {grouped.map((g) => (
-        <div key={g.set_code} style={{ marginBottom: 28 }}>
+        <div key={g.key} style={{ marginBottom: 28 }}>
           <h3
             className="hud-font"
             style={{
@@ -182,7 +188,7 @@ export function SearchPage() {
               letterSpacing: '0.03em',
             }}
           >
-            {g.set_code}（{g.set_name}）
+            {g.name}
             <span className="hud-mono" style={{ marginLeft: 8, fontSize: 11, color: 'var(--hud-ink-dim)', fontWeight: 400 }}>
               {g.cards.length} ITEMS
             </span>
