@@ -34,6 +34,8 @@ export const EMPTY_FILTERS: CardFilters = {
 type SkillRow = { skillType?: string }
 
 function cardSkillTypes(card: Card): string[] {
+  // 軽量データ（cards_listビュー）では、スキルの種類が skill_types に入っている
+  if (card.lean) return (card.skill_types ?? []).filter((v) => !!v && v !== 'ー')
   const skills = (card.skills_json ?? []) as SkillRow[]
   return skills.map((s) => s.skillType).filter((v): v is string => !!v && v !== 'ー')
 }

@@ -8,6 +8,7 @@ import { ArtsSkillsView } from './ArtsSkillsView'
 import { downloadCardImage } from '../lib/download'
 import { logEvent } from '../lib/logEvent'
 import { useIsMobile } from '../hooks/useGridLayout'
+import { useCardDetail } from '../hooks/useCardDetail'
 import { YellRow } from './YellIcon'
 import { getRarityConfig, renderRarityFrame } from '../utils/rarityFrame'
 
@@ -50,7 +51,9 @@ function splitTags(tags: string | null | undefined): string[] {
     .filter(Boolean)
 }
 
-export function CardModal({ card, onClose, onPrev, onNext, hasNav, onSelectCard }: Props) {
+export function CardModal({ card: cardProp, onClose, onPrev, onNext, hasNav, onSelectCard }: Props) {
+  // 一覧の軽量データのカードは、アーツ・固有スキル・評価をここで取得して合成する
+  const { card, loadingDetail } = useCardDetail(cardProp)
   const { related, loading } = useRelatedCards(card)
   const isMobile = useIsMobile()
 
@@ -238,6 +241,11 @@ export function CardModal({ card, onClose, onPrev, onNext, hasNav, onSelectCard 
                 </div>
               )}
 
+              {loadingDetail && (
+                <div className="hud-mono" style={{ marginTop: 12, fontSize: 12, color: 'var(--hud-ink-dim)' }}>
+                  詳細を読み込み中...
+                </div>
+              )}
               <ArtsSkillsView card={card} />
 
               {/* バトンタッチはアーツの下 */}

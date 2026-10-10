@@ -9,6 +9,7 @@ import { CardFilterPanel } from '../components/CardFilterPanel'
 import { CardModal } from '../components/CardModal'
 import { SiteNav } from '../components/SiteNav'
 import { FilterIcon } from '../components/FilterIcon'
+import { useIsMobile } from '../hooks/useGridLayout'
 import { CardSizeControl, CARD_SIZE_DEFAULT } from '../components/CardSizeControl'
 import { ControlsBar, useControlsOpen } from '../components/ControlsBar'
 import type { Card } from '../types/card'
@@ -43,7 +44,7 @@ export function SearchPage() {
   const setNameByCode = new Map(sets.map((s) => [s.set_code, s.set_name]))
 
   const [searchQuery, setSearchQuery] = useState('')
-  const [sortKey, setSortKey] = useState<SortKey>('name')
+  const [sortKey, setSortKey] = useState<SortKey>('overall')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   // 新カード一覧で選んでいるパックには左右されず、最初は全パックを対象に表示する
   const [filters, setFilters] = useState<CardFilters>(EMPTY_FILTERS)
@@ -52,6 +53,13 @@ export function SearchPage() {
   // 並び替え・昇降順は、パネルを閉じていても使えるよう開閉タブの横に常時表示する
   const [controlsOpen, setControlsOpen] = useControlsOpen('search', true)
   const [navIndex, setNavIndex] = useState(-1)
+  const isMobile = useIsMobile()
+
+  // パックごとの区切りをなくして、検索結果全体をひとつのリストとして並び替えて表示するモード（端末ごとに覚える）
+  const [mergePacks, setMergePacks] = useState(() => localStorage.getItem(MERGE_PACKS_STORAGE_KEY) === '1')
+  useEffect(() => {
+    localStorage.setItem(MERGE_PACKS_STORAGE_KEY, mergePacks ? '1' : '0')
+  }, [mergePacks])
 
   // カード表示サイズ（右下の+/🔄/-ボタンで変更）。新カード一覧と設定を共有する
   const [cardScale, setCardScale] = useState(() => {
@@ -67,7 +75,7 @@ export function SearchPage() {
   const sorted = sortCards(searched, sortKey, sortDir)
   const grouped = groupCardsBySet(sorted, setNameByCode)
   // 詳細モーダルの前へ/次へで辿る順序。一覧に表示されている並び（弾ごとのまとまり・並べ替え後の順）そのままにする
-  const navCards = grouped.flatMap((g) => g.cards)
+  const navCards = mergePacks ? sorted : grouped.flatMap((g) => g.cards)
 
   const handleCardClick = (card: Card) => {
     const idx = navCards.findIndex((c) => c.id === card.id)
@@ -89,13 +97,24 @@ export function SearchPage() {
         active={!!searchQuery.trim() || hasActiveFilters(filters)}
       >
         <select className="field" value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
+          <option value="overall">カード番号順</option>
           <option value="name">カード名順</option>
           <option value="rarity">レアリティ順</option>
-          <option value="overall">カード番号順（通し番号）</option>
           <option value="hp">HP順</option>
         </select>
         <button className="btn-secondary" onClick={() => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')}>
           {sortDir === 'asc' ? '昇順 ▲' : '降順 ▼'}
+        </button>
+        <button
+          className={mergePacks ? 'btn-primary' : 'btn-secondary'}
+          onClick={() => setMergePacks((v) => !v)}
+          aria-pressed={mergePacks}
+          title={mergePacks ? 'パックごとの区切りをなくして表示中（押すと元に戻す）' : 'パックごとの区切りをなくして、全体をまとめて並び替える'}
+          aria-label="パックごとの区切りをなくす"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+        >
+          <PackMergeIcon />
+          {!isMobile && 'パック区切りなし'}
         </button>
       </ControlsBar>
 
@@ -134,6 +153,20 @@ export function SearchPage() {
         {loading ? 'LOADING...' : `${sorted.length} ITEMS / ${grouped.length} SETS`}
       </div>
 
+      {mergePacks ? (
+        <CardGrid
+          cards={sorted}
+          onCardClick={handleCardClick}
+          isFav={() => false}
+          onToggleFav={() => {}}
+          selectionMode={false}
+          selectedIds={EMPTY_SELECTION}
+          onToggleSelect={() => {}}
+          tileScale={cardScale}
+          sortKey={sortKey}
+        />
+      ) : (
+        <>
       {grouped.map((g) => (
         <div key={g.set_code} style={{ marginBottom: 28 }}>
           <h3
@@ -166,9 +199,25 @@ export function SearchPage() {
           />
         </div>
       ))}
+        </>
+      )}
 
       <CardModal card={currentCard} onClose={handleClose} onPrev={handlePrev} onNext={handleNext} hasNav={navCards.length > 1} onSelectCard={() => {}} />
       <CardSizeControl scale={cardScale} onChange={setCardScale} />
     </div>
+  )
+}
+
+const MERGE_PACKS_STORAGE_KEY = 'horoka-display:search:mergePacks'
+
+// 「パックごとの区切りをなくす」ボタンのアイコン（ひとつにまとまった4枚のカード）
+function PackMergeIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden="true">
+      <rect x="1.75" y="1.75" width="5" height="5" rx="1" />
+      <rect x="9.25" y="1.75" width="5" height="5" rx="1" />
+      <rect x="1.75" y="9.25" width="5" height="5" rx="1" />
+      <rect x="9.25" y="9.25" width="5" height="5" rx="1" />
+    </svg>
   )
 }

@@ -1,4 +1,3 @@
-import { Fragment } from 'react'
 import type { Card } from '../types/card'
 import { CardTile } from './CardTile'
 import { useGridLayout } from '../hooks/useGridLayout'
@@ -16,6 +15,14 @@ type Props = {
   sortKey?: SortKey // 並び替えキー。レアリティ・HP・カード名順のときは、区切りの見出しを入れる
 }
 
+// 区切り線に付けるタグの短い文字（「レアリティ SR」→「SR」、「HP 90」→「HP90」、「その他（漢字など）」→「他」）
+function chipText(label: string): string {
+  return label
+    .replace(/^レアリティ\s?/, '')
+    .replace(/^HP\s/, 'HP')
+    .replace(/^その他（漢字など）$/, '他')
+}
+
 export function CardGrid({ cards, onCardClick, isFav, onToggleFav, selectionMode, selectedIds, onToggleSelect, tileScale = 1, sortKey }: Props) {
   // PCは最小タイル幅ベースの自動列数、スマホは倍率1で4列（詳細はuseGridLayout）
   const layout = useGridLayout(tileScale)
@@ -28,33 +35,50 @@ export function CardGrid({ cards, onCardClick, isFav, onToggleFav, selectionMode
       }}
     >
       {cards.map((card, index) => {
-        // 並び替えの区切り: 前のカードと見出しが変わったところに、行いっぱいの見出しを入れる
+        // 並び替えの区切り: 前のカードと見出しが変わったカードの左側（カードとカードの間）に縦の区切り線を引く
         const label = sortKey ? getSortGroupLabel(card, sortKey) : null
         const prevLabel = sortKey && index > 0 ? getSortGroupLabel(cards[index - 1]!, sortKey) : null
         const startsGroup = label !== null && (index === 0 || label !== prevLabel)
-        let groupCount = 0
-        if (startsGroup) {
-          for (let k = index; k < cards.length && getSortGroupLabel(cards[k]!, sortKey!) === label; k++) groupCount++
-        }
         return (
-          <Fragment key={card.id}>
+          <div key={card.id} style={{ position: 'relative' }}>
             {startsGroup && (
-              <div
-                className="hud-mono"
+              <span
+                title={`${label}ここから`}
+                aria-label={`${label}ここから`}
                 style={{
-                  gridColumn: '1 / -1',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  marginTop: index === 0 ? 0 : 8,
-                  fontSize: layout.compact ? 12 : 13,
-                  color: 'var(--hud-cyan)',
+                  position: 'absolute',
+                  zIndex: 3,
+                  top: 0,
+                  bottom: 0,
+                  left: -(layout.gap / 2) - 1,
+                  width: 2,
+                  borderRadius: 1,
+                  background: 'var(--hud-cyan)',
+                  boxShadow: '0 0 6px var(--hud-cyan)',
+                  pointerEvents: 'none',
                 }}
               >
-                <span style={{ whiteSpace: 'nowrap', fontWeight: 700 }}>▶ {label}</span>
-                <span style={{ flex: 1, height: 1, background: 'var(--hud-line)' }} />
-                <span style={{ whiteSpace: 'nowrap', color: 'var(--hud-ink-dim)' }}>{groupCount}枚</span>
-              </div>
+                {/* 区切り線の中ほどに、グループ名の小さなタグ */}
+                <span
+                  className="hud-mono"
+                  style={{
+                    position: 'absolute',
+                    top: '50%',
+                    left: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    padding: layout.compact ? '1px 3px' : '2px 5px',
+                    borderRadius: 4,
+                    background: 'var(--hud-cyan)',
+                    color: '#04232a',
+                    fontSize: layout.compact ? 9 : 11,
+                    fontWeight: 800,
+                    lineHeight: 1.1,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {chipText(label!)}
+                </span>
+              </span>
             )}
             <CardTile
               card={card}
@@ -66,7 +90,7 @@ export function CardGrid({ cards, onCardClick, isFav, onToggleFav, selectionMode
               onToggleSelect={onToggleSelect}
               compact={layout.compact}
             />
-          </Fragment>
+          </div>
         )
       })}
     </div>

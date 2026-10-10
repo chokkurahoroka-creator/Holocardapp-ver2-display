@@ -18,14 +18,53 @@ function rarityOrderIndex(rarity: string | null): number {
 export type SortKey = 'slot' | 'overall' | 'rarity' | 'name' | 'hp'
 const TYPE_ORDER: Card['type'][] = ['新規', '再録', 'パラレル']
 
-// 弾（set_code）→通し番号の順。通し番号が未設定のカードは、その弾の末尾に区分・スロット番号順で並べる
+// エールの色の並び順（それ以外の色・無色・色なしは最後の「その他」）
+const COLOR_ORDER = ['白', '緑', '赤', '青', '紫', '黄']
+
+function colorRank(attribute: string | null | undefined): number {
+  const a = (attribute || '').trim()
+  const exact = COLOR_ORDER.indexOf(a)
+  if (exact !== -1) return exact
+  // 「白/緑」のように複数の色が入っている場合は、並び順が先の色として扱う
+  const found = COLOR_ORDER.findIndex((c) => a.includes(c))
+  return found !== -1 ? found : COLOR_ORDER.length
+}
+
+// カードの種類の並び順: 推しホロメン → ホロメン → サポート（その他）
+function categoryRank(card: Card): number {
+  const t = card.card_type || ''
+  if (t.includes('推し') || /^O[A-Z]+$/i.test((card.rarity || '').trim())) return 0
+  if (t.includes('ホロメン')) return 1
+  return 2
+}
+
+// カード番号順（全カード検索の既定）。弾ごとに次の順で並べる。
+//   新規: 番号順
+//   再録: 推しホロメン(白,緑,赤,青,紫,黄,その他) → ホロメン(同) → サポート
+//   パラレル: 再録と同じ並び
+// 各グループの中は通し番号の順（通し番号が未設定のカードは、スロット番号順で末尾）
 function byOverallNumber(a: Card, b: Card) {
   const setCmp = (a.set_code || '').localeCompare(b.set_code || '')
   if (setCmp !== 0) return setCmp
+
+  const typeCmp = TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type)
+  if (typeCmp !== 0) return typeCmp
+
+  if (a.type !== '新規') {
+    const catA = categoryRank(a)
+    const catB = categoryRank(b)
+    if (catA !== catB) return catA - catB
+    // サポートは色で分けない
+    if (catA !== 2) {
+      const colorCmp = colorRank(a.attribute) - colorRank(b.attribute)
+      if (colorCmp !== 0) return colorCmp
+    }
+  }
+
   const an = a.overall_number ?? Number.POSITIVE_INFINITY
   const bn = b.overall_number ?? Number.POSITIVE_INFINITY
   if (an !== bn) return an < bn ? -1 : 1
-  return TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type) || Number(a.slot) - Number(b.slot)
+  return Number(a.slot) - Number(b.slot)
 }
 
 export type SortDir = 'asc' | 'desc'

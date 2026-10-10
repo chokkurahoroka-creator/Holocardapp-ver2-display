@@ -16,7 +16,10 @@ function artsText(card: Card): string[] {
 
 function matchesQuery(c: Card, q: string): boolean {
   const query = q.toLowerCase()
-  const fields = [c.card_name, c.card_type, c.card_number, c.set_code, c.tags, ...skillsText(c), ...artsText(c)]
+  // 軽量データ（cards_listビュー）は、固有スキル・アーツの文章が search_text にまとまっている
+  const fields = c.lean
+    ? [c.card_name, c.card_type, c.card_number, c.set_code, c.tags, c.search_text]
+    : [c.card_name, c.card_type, c.card_number, c.set_code, c.tags, ...skillsText(c), ...artsText(c)]
   return fields.some((f) => (f ?? '').toString().toLowerCase().includes(query))
 }
 
