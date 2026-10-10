@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '../lib/supabase'
+import { fetchAllCards } from '../lib/fetchAllCards'
 import type { Card } from '../types/card'
 
 export function useAllCards() {
@@ -7,15 +7,23 @@ export function useAllCards() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    let cancelled = false
     setLoading(true)
-    supabase
-      .from('cards')
-      .select('*')
-      .then(({ data, error }) => {
-        if (error) console.error(error)
-        setCards(data ?? [])
-        setLoading(false)
+    // 取得上限（1000行）を超えるぶんも、ページ分けしてすべて取得する
+    fetchAllCards()
+      .then((rows) => {
+        if (!cancelled) setCards(rows)
       })
+      .catch((error) => {
+        console.error(error)
+        if (!cancelled) setCards([])
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   return { cards, loading }
