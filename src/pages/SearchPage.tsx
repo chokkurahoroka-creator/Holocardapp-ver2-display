@@ -93,7 +93,8 @@ export function SearchPage() {
   const currentCard = navIndex !== -1 ? navCards[navIndex] ?? null : null
 
   return (
-    <div style={{ padding: 'clamp(10px, 4vw, 20px)' }}>
+    // カードの表示範囲は、画面の幅に対してPCは80%・スマホは90%にして、中央に寄せる
+    <div style={{ width: isMobile ? '90%' : '80%', margin: '0 auto', padding: 'clamp(10px, 4vw, 20px)' }}>
       <SiteNav />
 
       {/* 開閉タブ（▼/▲）と、その横に常時表示する並び替え・昇降順 */}

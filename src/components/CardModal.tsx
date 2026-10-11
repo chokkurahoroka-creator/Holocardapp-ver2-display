@@ -116,7 +116,8 @@ export function CardModal({ card: cardProp, onClose, onPrev, onNext, hasNav, onS
         justifyContent: 'center',
         zIndex: 1000,
         // 狭い画面では外側の余白を減らし、カード内容に使える幅を広くする
-        padding: 'clamp(4px, 2vw, 16px)',
+        // スマホは、モーダルの周りの余白（タップで閉じられる部分）を左右5%・上下5%確保する
+        padding: isMobile ? 0 : 'clamp(4px, 2vw, 16px)',
       }}
     >
       {/* 外枠：角カットのHUDパネル（ここはスクロールさせない） */}
@@ -125,8 +126,8 @@ export function CardModal({ card: cardProp, onClose, onPrev, onNext, hasNav, onS
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
         style={{
-          width: 'min(96vw, 1280px)',
-          maxHeight: '96vh',
+          width: isMobile ? '90%' : 'min(96vw, 1280px)',
+          maxHeight: isMobile ? '90vh' : '96vh',
           display: 'flex',
           flexDirection: 'column',
           color: 'var(--hud-ink)',
@@ -137,11 +138,14 @@ export function CardModal({ card: cardProp, onClose, onPrev, onNext, hasNav, onS
           className="btn-icon"
           style={{
             position: 'absolute',
-            top: isMobile ? 4 : 6,
+            top: isMobile ? 6 : 6,
             right: isMobile ? 6 : 14,
-            fontSize: isMobile ? 28 : 22,
+            fontSize: isMobile ? 40 : 22,
             zIndex: 11,
-            ...(isMobile ? { width: 44, height: 44, lineHeight: 1 } : null),
+            // スマホは押しやすい大きさにして、背景も付けて見つけやすくする
+            ...(isMobile
+              ? { width: 56, height: 56, lineHeight: 1, borderRadius: '50%', background: 'rgba(6,18,23,0.85)', border: '1px solid var(--hud-cyan)', color: '#fff' }
+              : null),
           }}
           aria-label="閉じる"
         >
@@ -161,7 +165,7 @@ export function CardModal({ card: cardProp, onClose, onPrev, onNext, hasNav, onS
 
         {/* 中身：実際にスクロールする領域。左右の余白はclamp()でビューポート幅に応じて縮める
             （固定56pxのままだと狭いスマホ画面でコンテンツ幅を圧迫しすぎるため） */}
-        <div style={{ overflowY: 'auto', padding: 'clamp(16px, 6vw, 32px) clamp(16px, 10vw, 64px) 28px' }}>
+        <div style={{ overflowY: 'auto', padding: isMobile ? '64px 14px 28px' : 'clamp(16px, 6vw, 32px) clamp(16px, 10vw, 64px) 28px' }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24 }}>
             {/* スマホでは画像を画面幅いっぱいに合わせて中央配置し、ダウンロードボタンは出さない */}
             <div
@@ -230,6 +234,13 @@ export function CardModal({ card: cardProp, onClose, onPrev, onNext, hasNav, onS
                 )}
               </div>
 
+              {/* オリジナル番号（再録・パラレルの元カードの番号） */}
+              {card.original_number && (
+                <div className="hud-mono" style={{ marginBottom: 6, fontSize: 14, color: 'var(--hud-ink-dim)' }}>
+                  オリジナル番号: <span style={{ color: 'var(--hud-ink)', fontWeight: 700 }}>{card.original_number}</span>
+                </div>
+              )}
+
               {/* タグ */}
               {tags.length > 0 && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 4 }}>
@@ -273,19 +284,21 @@ export function CardModal({ card: cardProp, onClose, onPrev, onNext, hasNav, onS
           <RelatedCards related={related} loading={loading} onSelect={onSelectCard} />
         </div>
 
-        {/* スマホ: 親指で押しやすい大きな前後ボタンを下部に固定（スワイプでも移動できる） */}
-        {hasNav && isMobile && (
-          <div style={{ display: 'flex', gap: 8, padding: 8, borderTop: '1px solid var(--hud-line)', flexShrink: 0 }}>
-            <button onClick={onPrev} style={mobileNavButtonStyle} aria-label="前のカード">
-              <span style={{ fontSize: 28, lineHeight: 1 }}>‹</span> 前へ
-            </button>
-            <button onClick={onNext} style={mobileNavButtonStyle} aria-label="次のカード">
-              次へ <span style={{ fontSize: 28, lineHeight: 1 }}>›</span>
-            </button>
-          </div>
-        )}
       </div>
     </div>
+
+    {/* スマホ: 前へ/次へは矢印だけのボタンにして、画面の両端・下から20%の位置に固定する（スワイプでも移動できる）。
+        パネルの角が斜めに切り抜かれているため、パネルの外（兄弟要素）に置いている */}
+    {hasNav && isMobile && !zoomed && (
+      <>
+        <button onClick={onPrev} aria-label="前のカード" style={{ ...mobileArrowStyle, left: 4 }}>
+          <ArrowIcon direction="left" />
+        </button>
+        <button onClick={onNext} aria-label="次のカード" style={{ ...mobileArrowStyle, right: 4 }}>
+          <ArrowIcon direction="right" />
+        </button>
+      </>
+    )}
 
     {/* 画像の全画面表示（クリック/タップ、Escで閉じる） */}
     {zoomed && card.image_url && (
@@ -343,19 +356,21 @@ const tagStyle: CSSProperties = {
   borderRadius: 999,
 }
 
-const mobileNavButtonStyle: CSSProperties = {
-  flex: 1,
-  height: 52,
+// スマホの前へ/次へ（矢印のみ）。画面に固定し、下から20%の高さに置く
+const mobileArrowStyle: CSSProperties = {
+  position: 'fixed',
+  bottom: '20%',
+  zIndex: 1050,
+  width: 48,
+  height: 72,
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  gap: 8,
-  fontSize: 15,
-  fontWeight: 700,
-  color: 'var(--hud-ink)',
-  background: 'rgba(0,229,255,0.12)',
+  color: 'var(--hud-cyan)',
+  background: 'rgba(6,18,23,0.82)',
   border: '1px solid var(--hud-cyan)',
-  borderRadius: 10,
+  borderRadius: 12,
+  boxShadow: '0 2px 10px rgba(0,0,0,0.5)',
   cursor: 'pointer',
   touchAction: 'manipulation',
 }
@@ -370,4 +385,12 @@ function badgeStyle(color: string): CSSProperties {
     borderRadius: 4,
     fontWeight: 600,
   }
+}
+
+function ArrowIcon({ direction }: { direction: 'left' | 'right' }) {
+  return (
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {direction === 'left' ? <polyline points="15 4 7 12 15 20" /> : <polyline points="9 4 17 12 9 20" />}
+    </svg>
+  )
 }

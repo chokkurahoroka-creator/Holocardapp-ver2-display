@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useSets } from '../hooks/useSets'
 import { useCardsBySets } from '../hooks/useCardsBySets'
 import { usePackSets } from '../hooks/usePackSets'
+import { useIsMobile } from '../hooks/useGridLayout'
 import { buildPackGroups, resolveGroupKey } from '../utils/packGroups'
 import { useCardSearch } from '../hooks/useCardSearch'
 import { useSiteStatus } from '../hooks/useSiteStatus'
@@ -35,6 +36,7 @@ function groupCardsByType(cards: Card[]): { type: Card['type']; cards: Card[] }[
 export function DisplayPage() {
   const { sets } = useSets()
   const { packSets } = usePackSets()
+  const isMobile = useIsMobile()
   // 選択中の「パックセット（または単独パック）」。以前の版では弾コードを保存していたため、保存値は弾コードでも受け付ける
   const [groupKey, setGroupKey] = useState<string | null>(() => localStorage.getItem(STORAGE_KEY))
   // パック選択リストは、管理画面で「公開中」に設定されているパックだけを、パックセットごとにまとめて表示する
@@ -207,6 +209,10 @@ export function DisplayPage() {
       {isMaintenance && <MaintenanceBanner position="top" />}
       <div
         style={{
+          // カードの表示範囲は、画面の幅に対してPCは80%・スマホは90%にして、中央に寄せる
+          width: isMobile ? '90%' : '80%',
+          marginLeft: 'auto',
+          marginRight: 'auto',
           padding: 'clamp(10px, 4vw, 20px)',
           marginTop: isMaintenance ? 28 : 0,
           marginBottom: isMaintenance ? 28 : 0,

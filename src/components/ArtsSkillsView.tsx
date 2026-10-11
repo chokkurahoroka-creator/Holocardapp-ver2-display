@@ -65,25 +65,20 @@ const blockBase: CSSProperties = {
   marginBottom: 8,
 }
 
-const sectionTitleStyle: CSSProperties = {
-  fontSize: 11,
-  color: 'var(--hud-cyan)',
-  margin: '16px 0 8px',
-}
-
 type Props = { card: Card }
 
 export function ArtsSkillsView({ card }: Props) {
   // PCは文字を太く・大きくして読みやすくする（スマホは従来サイズ）
   const isMobile = useIsMobile()
-  const titleSize = isMobile ? 15 : 18
+  // アーツ名・スキル名と本文は、読みやすいように大きく表示する
+  const titleSize = isMobile ? 19 : 26
   const titleWeight = isMobile ? 700 : 800
-  const bodySize = isMobile ? 13 : 15
+  const bodySize = isMobile ? 14 : 17
   const bodyWeight = isMobile ? 400 : 600
-  const damageSize = isMobile ? 16 : 22
-  const sectionLabelSize = isMobile ? 13 : 15
-  const badgeSize = isMobile ? 10 : 12
-  const yellSize = isMobile ? 24 : 30 // アーツに必要なエール画像の大きさ
+  const damageSize = isMobile ? 20 : 28
+  const tokkouSize = isMobile ? 12 : 15
+  const badgeSize = isMobile ? 11 : 13
+  const yellSize = isMobile ? 24 : 32 // アーツに必要なエール画像の大きさ
   const bannerHeight = isMobile ? 28 : 38 // スキル種別バナー画像の高さ
   const skills = ((card.skills_json ?? []) as SkillRow[]).filter((s) => s && (s.title || s.text))
   const arts = ((card.arts_json ?? []) as ArtRow[]).filter((a) => a && (a.name || a.effectText || a.damage))
@@ -93,10 +88,7 @@ export function ArtsSkillsView({ card }: Props) {
   return (
     <div>
       {skills.length > 0 && (
-        <>
-          <div className="hud-mono" style={sectionTitleStyle}>
-            SKILLS<span className="hud-font" style={{ marginLeft: 8, color: 'var(--hud-ink-dim)', fontSize: sectionLabelSize, fontWeight: isMobile ? 400 : 700 }}>固有スキル</span>
-          </div>
+        <div style={{ marginTop: 12 }}>
           {skills.map((s, i) => {
             const isExtra = s.skillType === EXTRA_SKILL_TYPE
             const accent = isExtra ? GOLD : '#64b5f6'
@@ -112,7 +104,9 @@ export function ArtsSkillsView({ card }: Props) {
                 boxShadow: isExtra ? '0 0 10px rgba(255,200,61,0.25)' : undefined,
               }}
             >
-              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: s.text ? 4 : 0 }}>
+              {/* 1行: 左に種別バナー・ホロパワーコスト、残りの幅の中央にスキル名 */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: s.text ? 6 : 0 }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, flex: '0 0 auto' }}>
                 {/* ギフト・コラボエフェクト・ブルームエフェクトはバナー画像、それ以外（エクストラなど）は文字バッジ */}
                 {hasSkillBanner(s.skillType) && <SkillBanner skillType={s.skillType!} height={bannerHeight} />}
                 {s.skillType && s.skillType !== 'ー' && !hasSkillBanner(s.skillType) && (
@@ -132,10 +126,11 @@ export function ArtsSkillsView({ card }: Props) {
                     ホロパワー -{s.powerCost}
                   </span>
                 )}
+                </div>
                 {s.title && (
-                  <span className="hud-font" style={{ fontSize: titleSize, fontWeight: titleWeight, color: '#fff' }}>
+                  <div className="hud-font" style={{ flex: '1 1 0', minWidth: 120, textAlign: 'center', fontSize: titleSize, fontWeight: titleWeight, color: '#fff', lineHeight: 1.3 }}>
                     {s.title}
-                  </span>
+                  </div>
                 )}
               </div>
               {s.text && (
@@ -146,14 +141,11 @@ export function ArtsSkillsView({ card }: Props) {
             </div>
             )
           })}
-        </>
+        </div>
       )}
 
       {arts.length > 0 && (
-        <>
-          <div className="hud-mono" style={sectionTitleStyle}>
-            ARTS<span className="hud-font" style={{ marginLeft: 8, color: 'var(--hud-ink-dim)', fontSize: sectionLabelSize, fontWeight: isMobile ? 400 : 700 }}>アーツ</span>
-          </div>
+        <div style={{ marginTop: 12 }}>
           {arts.map((a, i) => (
             <div
               key={i}
@@ -165,37 +157,47 @@ export function ArtsSkillsView({ card }: Props) {
                 borderLeft: '4px solid #e88c4d',
               }}
             >
+              {/* 1行: 左に必要なエール、残りの幅の中央にアーツ名、右にダメージとその右に特攻 */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                {a.yellCost && a.yellCost.length > 0 && <YellRow items={a.yellCost} size={yellSize} />}
-                {a.name && (
-                  <span className="hud-font" style={{ fontSize: titleSize, fontWeight: titleWeight, color: '#fff' }}>
-                    {a.name}
-                  </span>
+                {a.yellCost && a.yellCost.length > 0 && (
+                  <div style={{ flex: '0 0 auto' }}>
+                    <YellRow items={a.yellCost} size={yellSize} />
+                  </div>
                 )}
-                {a.damage && (
-                  <span className="hud-mono" style={{ marginLeft: 'auto', fontSize: damageSize, fontWeight: 800, color: '#ffb27a' }}>
-                    {a.damage}
-                  </span>
+                {a.name ? (
+                  <div className="hud-font" style={{ flex: '1 1 0', minWidth: 120, textAlign: 'center', fontSize: titleSize, fontWeight: titleWeight, color: '#fff', lineHeight: 1.3 }}>
+                    {a.name}
+                  </div>
+                ) : (
+                  <div style={{ flex: '1 1 0' }} />
+                )}
+                {(a.damage || a.specialAttackColor) && (
+                  <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 12 }}>
+                    {a.damage && (
+                      <span className="hud-mono" style={{ fontSize: damageSize, fontWeight: 800, color: '#ffb27a' }}>
+                        {a.damage}
+                      </span>
+                    )}
+                    {a.specialAttackColor && (
+                      <span className="hud-mono" style={{ fontSize: tokkouSize, display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--hud-ink-dim)', whiteSpace: 'nowrap' }}>
+                        特攻
+                        <span
+                          style={{
+                            width: tokkouSize - 2,
+                            height: tokkouSize - 2,
+                            borderRadius: '50%',
+                            background: YELL_COLOR_MAP[a.specialAttackColor] ?? '#9aa5a8',
+                            display: 'inline-block',
+                            border: '1px solid rgba(255,255,255,0.35)',
+                          }}
+                        />
+                        {a.specialAttackColor}
+                        {a.specialAttackDamage && <span style={{ color: '#ffb27a', fontWeight: 800 }}>{a.specialAttackDamage}</span>}
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
-
-              {a.specialAttackColor && (
-                <div className="hud-mono" style={{ fontSize: 11, marginTop: 4, color: 'var(--hud-ink-dim)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  特攻:
-                  <span
-                    style={{
-                      width: 10,
-                      height: 10,
-                      borderRadius: '50%',
-                      background: YELL_COLOR_MAP[a.specialAttackColor] ?? '#9aa5a8',
-                      display: 'inline-block',
-                      border: '1px solid rgba(255,255,255,0.35)',
-                    }}
-                  />
-                  {a.specialAttackColor}
-                  {a.specialAttackDamage && <span style={{ color: '#ffb27a', fontWeight: 700 }}>{a.specialAttackDamage}</span>}
-                </div>
-              )}
 
               {a.effectText && (
                 <div style={{ fontSize: bodySize, fontWeight: bodyWeight, lineHeight: 1.75, color: 'var(--hud-ink)', marginTop: 6, whiteSpace: 'pre-wrap' }}>
@@ -204,7 +206,7 @@ export function ArtsSkillsView({ card }: Props) {
               )}
             </div>
           ))}
-        </>
+        </div>
       )}
     </div>
   )
