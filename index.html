@@ -10,6 +10,17 @@
     <link rel="manifest" href="/site.webmanifest" />
     <meta name="theme-color" content="#061217" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- スマホ（タッチ端末）で入力欄を押したときに、画面が勝手に拡大されるのを防ぐ。
+         iPhoneは、入力欄の文字が16px未満だと拡大するため、入力欄だけ16px以上にそろえる -->
+    <style>
+      @media (hover: none) and (pointer: coarse) {
+        input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not([type='button']):not([type='submit']),
+        select,
+        textarea {
+          font-size: 16px !important;
+        }
+      }
+    </style>
     <title>horoka-display</title>
   </head>
   <body>
