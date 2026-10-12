@@ -90,6 +90,7 @@ export function CardGrid({ cards, onCardClick, isFav, onToggleFav, selectionMode
               selected={selectedIds.has(card.id)}
               onToggleSelect={onToggleSelect}
               compact={layout.compact}
+              hideFav={layout.hideFav}
             />
           </div>
         )

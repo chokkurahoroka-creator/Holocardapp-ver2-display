@@ -29,7 +29,25 @@ export function ControlsBar({ open, onToggle, active = false, children }: Props)
   const isMobile = useIsMobile()
 
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: isMobile ? 6 : 10, marginBottom: open ? 8 : 12 }}>
+    <div
+      // スマホでは画面の横幅いっぱいの帯にする（PCは今まで通り、ページ内に収める）
+      className={isMobile ? 'mobileBleed' : undefined}
+      style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        gap: isMobile ? 6 : 10,
+        marginBottom: open ? 8 : 12,
+        ...(isMobile
+          ? {
+              padding: '6px max(10px, 4vw)',
+              background: 'var(--hud-panel)',
+              borderTop: '1px solid var(--hud-line)',
+              borderBottom: '1px solid var(--hud-line)',
+            }
+          : null),
+      }}
+    >
       <button
         type="button"
         onClick={onToggle}

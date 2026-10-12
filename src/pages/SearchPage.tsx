@@ -126,7 +126,7 @@ export function SearchPage() {
       </ControlsBar>
 
       {controlsOpen && (
-        <section className="hud-panel" style={{ padding: 'clamp(10px, 3vw, 16px)', marginBottom: 20 }}>
+        <section className="hud-panel mobileBleed" style={{ padding: 'clamp(10px, 3vw, 16px)', marginBottom: 20 }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
             <input
               className="field"

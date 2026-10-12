@@ -21,6 +21,9 @@ type Props = {
   onClose?: () => void // 指定した場合、パネル内に「閉じる」ボタンを表示する
 }
 
+// 区分の選択肢（カードの type と同じ値）
+const CARD_KIND_OPTIONS = ['新規', '再録', 'パラレル']
+
 function toggle(arr: string[], value: string): string[] {
   return arr.includes(value) ? arr.filter((v) => v !== value) : [...arr, value]
 }
@@ -326,6 +329,14 @@ export function CardFilterPanel({ cards, filters, onChange, sets, onClose }: Pro
             </select>
           </div>
         )}
+
+        {/* 区分（新規・再録・パラレル）。未選択ならすべて表示する */}
+        <ToggleGroup
+          label="区分（未選択ならすべて表示）"
+          options={CARD_KIND_OPTIONS}
+          selected={filters.types}
+          onToggle={(v) => onChange({ ...filters, types: toggle(filters.types, v) })}
+        />
 
         <ToggleGroup
           label="固有スキル種類"

@@ -25,6 +25,7 @@ export type GridLayout = {
   gridTemplateColumns: string
   gap: number
   compact: boolean // trueのとき、タイル下部のテキスト情報を省いてコンパクトに表示する
+  hideFav: boolean // trueのとき、カードが小さすぎるので、お気に入りの★ボタンを出さない
 }
 
 // カード一覧グリッドの列構成。表示サイズ倍率（右下の＋/−ボタン）に応じて変わる。
@@ -40,6 +41,8 @@ export function useGridLayout(tileScale: number): GridLayout {
       gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
       gap: columns >= 4 ? 6 : 10,
       compact: columns >= 3,
+      // 5列以上（既定の4列より小さく表示）になったら、★は小さすぎて押しにくく、画像も隠すので非表示にする
+      hideFav: columns >= 5,
     }
   }
 
@@ -47,5 +50,6 @@ export function useGridLayout(tileScale: number): GridLayout {
     gridTemplateColumns: `repeat(auto-fill, minmax(clamp(${Math.round(110 * tileScale)}px, 40vw, ${Math.round(160 * tileScale)}px), 1fr))`,
     gap: 12,
     compact: tileScale < 0.75,
+    hideFav: tileScale < 0.6,
   }
 }

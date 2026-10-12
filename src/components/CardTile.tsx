@@ -10,9 +10,10 @@ type Props = {
   selected: boolean
   onToggleSelect: (card: Card) => void
   compact?: boolean // 小さい表示サイズ・スマホの多列表示のとき、下部のテキスト情報を非表示にして余白も詰める
+  hideFav?: boolean // カードが小さいとき、お気に入りの★ボタンを非表示にする（一括選択モードのチェックは常に表示）
 }
 
-export function CardTile({ card, onClick, isFav, onToggleFav, selectionMode, selected, onToggleSelect, compact = false }: Props) {
+export function CardTile({ card, onClick, isFav, onToggleFav, selectionMode, selected, onToggleSelect, compact = false, hideFav = false }: Props) {
   const badgeColor = getRarityConfig(card.rarity).badgeColor
 
   return (
@@ -44,7 +45,7 @@ export function CardTile({ card, onClick, isFav, onToggleFav, selectionMode, sel
         >
           {selected ? '✓' : ''}
         </div>
-      ) : (
+      ) : hideFav ? null : (
         <button
           onClick={(e) => {
             e.stopPropagation()

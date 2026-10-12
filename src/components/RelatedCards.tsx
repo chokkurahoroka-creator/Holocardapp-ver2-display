@@ -24,10 +24,23 @@ export function RelatedCards({ related, loading, onSelect }: Props) {
           <div
             key={`${r.card.set_code}__${r.card.type}__${r.card.slot}`}
             onClick={() => onSelect(r.card)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                onSelect(r.card)
+              }
+            }}
+            role="button"
+            tabIndex={0}
+            title={`${r.card.card_name}の詳細を開く`}
+            aria-label={`${r.card.card_name}の詳細を開く`}
+            className="transition-transform hover:scale-105 active:scale-95"
             style={{ cursor: 'pointer', textAlign: 'center', width: 90 }}
           >
             <img
               src={r.card.image_url ?? ''}
+              alt={r.card.card_name}
+              loading="lazy"
               style={{
                 width: 90,
                 aspectRatio: '5/7',

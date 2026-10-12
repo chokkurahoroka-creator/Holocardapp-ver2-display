@@ -7,6 +7,9 @@ export type FilterLogic = 'and' | 'or'
 
 export type CardFilters = {
   logic: FilterLogic
+  // 区分（新規・再録・パラレル）。未選択ならすべて表示。選んだ区分のどれかに当てはまるカードだけを表示する。
+  // 他の条件のAND/ORには含めず、常に「他の条件に加えて」絞り込む
+  types: string[]
   skillTypes: string[]
   hpMin: string
   hpMax: string
@@ -20,6 +23,7 @@ export type CardFilters = {
 
 export const EMPTY_FILTERS: CardFilters = {
   logic: 'and',
+  types: [],
   skillTypes: [],
   hpMin: '',
   hpMax: '',
@@ -119,6 +123,7 @@ function activeChecks(c: Card, filters: CardFilters): boolean[] {
 
 export function applyCardFilters(cards: Card[], filters: CardFilters): Card[] {
   return cards.filter((c) => {
+    if (filters.types.length > 0 && !filters.types.includes(c.type)) return false
     const checks = activeChecks(c, filters)
     if (checks.length === 0) return true
     return filters.logic === 'or' ? checks.some(Boolean) : checks.every(Boolean)
@@ -127,6 +132,7 @@ export function applyCardFilters(cards: Card[], filters: CardFilters): Card[] {
 
 export function hasActiveFilters(filters: CardFilters): boolean {
   return (
+    filters.types.length > 0 ||
     filters.skillTypes.length > 0 ||
     filters.hpMin !== '' ||
     filters.hpMax !== '' ||
@@ -142,6 +148,7 @@ export function hasActiveFilters(filters: CardFilters): boolean {
 // 現在アクティブなフィルター条件を「カテゴリ: 値」のチップ一覧として返す（選択解除ボタン用）
 export function activeFilterChips(filters: CardFilters): { category: keyof CardFilters; value: string; label: string }[] {
   const chips: { category: keyof CardFilters; value: string; label: string }[] = []
+  filters.types.forEach((v) => chips.push({ category: 'types', value: v, label: `区分: ${v}` }))
   filters.skillTypes.forEach((v) => chips.push({ category: 'skillTypes', value: v, label: `スキル種類: ${v}` }))
   filters.tags.forEach((v) => chips.push({ category: 'tags', value: v, label: `タグ: ${v}` }))
   filters.batonTouches.forEach((v) => chips.push({ category: 'batonTouches', value: v, label: `バトンタッチ: ${v}` }))

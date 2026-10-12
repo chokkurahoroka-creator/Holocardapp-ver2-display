@@ -52,8 +52,22 @@ function splitTags(tags: string | null | undefined): string[] {
 }
 
 export function CardModal({ card: cardProp, onClose, onPrev, onNext, hasNav, onSelectCard }: Props) {
+  // 関連カードをたどった履歴。関連カードの画像を押すと、一覧に表示されていないカード（別のパックなど）でも
+  // そのカードの詳細をここで直接表示する。一覧側で前へ/次へ・閉じるを操作したときは履歴を消す
+  const [relatedStack, setRelatedStack] = useState<Card[]>([])
+  const listCardId = cardProp?.id
+  useEffect(() => {
+    setRelatedStack([])
+  }, [listCardId])
+  const shownCard = cardProp ? (relatedStack.length > 0 ? relatedStack[relatedStack.length - 1]! : cardProp) : null
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const shownId = shownCard?.id
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0 })
+  }, [shownId])
+
   // 一覧の軽量データのカードは、アーツ・固有スキル・評価をここで取得して合成する
-  const { card, loadingDetail } = useCardDetail(cardProp)
+  const { card, loadingDetail } = useCardDetail(shownCard)
   const { related, loading } = useRelatedCards(card)
   const isMobile = useIsMobile()
 
@@ -144,13 +158,40 @@ export function CardModal({ card: cardProp, onClose, onPrev, onNext, hasNav, onS
             zIndex: 11,
             // スマホは押しやすい大きさにして、背景も付けて見つけやすくする
             ...(isMobile
-              ? { width: 56, height: 56, lineHeight: 1, borderRadius: '50%', background: 'rgba(6,18,23,0.85)', border: '1px solid var(--hud-cyan)', color: '#fff' }
+              ? { width: 56, height: 56, lineHeight: 1, borderRadius: '50%', background: 'rgba(6,18,23,0.85)', border: '1px solid var(--hud-cyan)', color: '#fff', opacity: 0.5 }
               : null),
           }}
           aria-label="閉じる"
         >
           ×
         </button>
+
+        {/* 関連カードを表示しているときは、1つ前のカードに戻るボタンを出す */}
+        {relatedStack.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setRelatedStack((s) => s.slice(0, -1))}
+            className="hud-mono"
+            style={{
+              position: 'absolute',
+              top: 8,
+              left: isMobile ? 8 : 14,
+              zIndex: 11,
+              height: isMobile ? 48 : 34,
+              padding: isMobile ? '0 18px' : '0 14px',
+              fontSize: isMobile ? 16 : 13,
+              fontWeight: 700,
+              color: 'var(--hud-cyan)',
+              background: 'rgba(6,18,23,0.85)',
+              border: '1px solid var(--hud-cyan)',
+              borderRadius: 999,
+              cursor: 'pointer',
+              touchAction: 'manipulation',
+            }}
+          >
+            ← 戻る
+          </button>
+        )}
 
         {hasNav && !isMobile && (
           <>
@@ -165,7 +206,16 @@ export function CardModal({ card: cardProp, onClose, onPrev, onNext, hasNav, onS
 
         {/* 中身：実際にスクロールする領域。左右の余白はclamp()でビューポート幅に応じて縮める
             （固定56pxのままだと狭いスマホ画面でコンテンツ幅を圧迫しすぎるため） */}
-        <div style={{ overflowY: 'auto', padding: isMobile ? '64px 14px 28px' : 'clamp(16px, 6vw, 32px) clamp(16px, 10vw, 64px) 28px' }}>
+        <div
+          ref={scrollRef}
+          style={{
+            overflowY: 'auto',
+            // スマホは、カード上部の余白も左右と同じ14pxにそろえる（戻るボタンを出しているときだけ、ボタンの分あける）
+            padding: isMobile
+              ? `${relatedStack.length > 0 ? 62 : 14}px 14px 28px`
+              : `${relatedStack.length > 0 ? 52 : 32}px clamp(16px, 10vw, 64px) 28px`,
+          }}
+        >
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24 }}>
             {/* スマホでは画像を画面幅いっぱいに合わせて中央配置し、ダウンロードボタンは出さない */}
             <div
@@ -281,7 +331,15 @@ export function CardModal({ card: cardProp, onClose, onPrev, onNext, hasNav, onS
             </div>
           </div>
 
-          <RelatedCards related={related} loading={loading} onSelect={onSelectCard} />
+          <RelatedCards
+            related={related}
+            loading={loading}
+            onSelect={(c) => {
+              // 一覧に表示されているカードなら、一覧側の位置も合わせる（前へ/次へがそこから続く）。無ければここで直接表示する
+              onSelectCard(c)
+              setRelatedStack((s) => [...s, c])
+            }}
+          />
         </div>
 
       </div>
@@ -375,6 +433,15 @@ const mobileArrowStyle: CSSProperties = {
   touchAction: 'manipulation',
 }
 
+function ArrowIcon({ direction }: { direction: 'left' | 'right' }) {
+  return (
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {direction === 'left' ? <polyline points="15 4 7 12 15 20" /> : <polyline points="9 4 17 12 9 20" />}
+    </svg>
+  )
+}
+
+// 種別・レア度・カードタイプ・進化段階のバッジ
 function badgeStyle(color: string): CSSProperties {
   return {
     fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
@@ -385,12 +452,4 @@ function badgeStyle(color: string): CSSProperties {
     borderRadius: 4,
     fontWeight: 600,
   }
-}
-
-function ArrowIcon({ direction }: { direction: 'left' | 'right' }) {
-  return (
-    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      {direction === 'left' ? <polyline points="15 4 7 12 15 20" /> : <polyline points="9 4 17 12 9 20" />}
-    </svg>
-  )
 }

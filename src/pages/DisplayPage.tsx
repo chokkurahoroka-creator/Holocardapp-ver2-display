@@ -138,11 +138,9 @@ export function DisplayPage() {
 
   const handleSelectRelated = (card: Card) => {
     const idx = navCards.findIndex((c) => c.id === card.id)
-    if (idx !== -1) {
-      setNavIndex(idx)
-    } else {
-      console.log('別弾の関連カードは現状未対応:', card.card_name)
-    }
+    // 一覧に表示されているカードなら、その位置に合わせる。表示されていないカード（別のパックなど）は、
+    // モーダル側（CardModal）が直接表示するので、ここでは何もしない
+    if (idx !== -1) setNavIndex(idx)
   }
 
   const handleCardClick = (card: Card) => {
@@ -248,7 +246,7 @@ export function DisplayPage() {
 
         {/* 操作パネル */}
         {controlsOpen && (
-        <section className="hud-panel" style={{ padding: 'clamp(10px, 3vw, 16px)', marginBottom: 20 }}>
+        <section className="hud-panel mobileBleed" style={{ padding: 'clamp(10px, 3vw, 16px)', marginBottom: 20 }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
             <input
               className="field"
@@ -432,6 +430,7 @@ export function DisplayPage() {
             background: 'var(--hud-panel)',
             borderTop: '1px solid var(--hud-cyan)',
             padding: '10px clamp(10px, 4vw, 20px)',
+            paddingBottom: 'calc(10px + env(safe-area-inset-bottom, 0px))', // iPhoneのホームバーに重ならないように
             display: 'flex',
             alignItems: 'center',
             gap: 12,

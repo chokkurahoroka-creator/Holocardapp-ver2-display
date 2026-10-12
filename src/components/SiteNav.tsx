@@ -17,6 +17,20 @@ const LINKS = [
 // メディアクエリはインラインstyleで書けないため、<style>で定義する。
 // 既存の .hud-nav-item のスタイルを上書きするので !important を付けている
 const NAV_CSS = `
+/* iPhoneのステータスバー（時計・電波）の裏側。ここにスクロール中のカードが透けて見えないよう、不透明な色で塞ぐ。
+   index.html に viewport-fit=cover を指定しているため、この領域の高さは env(safe-area-inset-top) で取れる */
+.siteNavSafeCover {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: env(safe-area-inset-top, 0px);
+  background: var(--hud-bg, #061217);
+  z-index: 950;
+  pointer-events: none;
+}
+/* 作業中バナーも、ステータスバーの下から始める */
+.maintenanceBanner.top { top: env(safe-area-inset-top, 0px) !important; }
 .siteNav {
   position: sticky;
   z-index: 800;
@@ -49,9 +63,22 @@ const NAV_CSS = `
 .siteNavYoutube .short { display: none; }
 
 @media (max-width: 640px) {
+  /* スマホでは、ナビ・操作バー・操作パネルを画面の横幅いっぱいに広げる
+     （親が中央寄せの90%幅なので、左右へ「親の半分 − 画面の半分」だけはみ出させる） */
+  .mobileBleed {
+    margin-left: calc(50% - 50vw) !important;
+    margin-right: calc(50% - 50vw) !important;
+    border-left: 0 !important;
+    border-right: 0 !important;
+    border-radius: 0 !important;
+    clip-path: none !important;
+  }
+  .mobileBleed::before,
+  .mobileBleed::after { display: none !important; }
+
   .siteNav {
     gap: 4px 8px;
-    padding: 5px 8px;
+    padding: 5px max(8px, env(safe-area-inset-left, 0px)) 5px max(8px, env(safe-area-inset-right, 0px));
     margin-bottom: 10px;
   }
   .siteNavBrandTitle { font-size: 13px !important; line-height: 1.2; }
@@ -100,9 +127,15 @@ export function SiteNav() {
   return (
     <>
       <style>{NAV_CSS}</style>
+      <div className="siteNavSafeCover" aria-hidden="true" />
       <header
-        className="hud-panel siteNav"
-        style={{ top: isMaintenance ? MAINTENANCE_BANNER_HEIGHT : 0 }}
+        className="hud-panel siteNav mobileBleed"
+        style={{
+          // ステータスバーの下（セーフエリアの分）から固定する。作業中バナーが出ているときはその分さらに下げる
+          top: isMaintenance
+            ? `calc(${MAINTENANCE_BANNER_HEIGHT}px + env(safe-area-inset-top, 0px))`
+            : 'env(safe-area-inset-top, 0px)',
+        }}
       >
         <div className="siteNavBrand">
           <div className="hud-font siteNavBrandTitle" style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>
