@@ -73,22 +73,108 @@ export function distinctTags(cards: Card[]): string[] {
   return sortJa(Array.from(set))
 }
 
+// タグごとの付いているカード枚数（多い順）。よく使われるタグをワンタップ選択として並べるのに使う
+export function tagCounts(cards: Card[]): { tag: string; count: number }[] {
+  const map = new Map<string, number>()
+  cards.forEach((c) => splitTags(c.tags).forEach((t) => map.set(t, (map.get(t) ?? 0) + 1)))
+  return Array.from(map, ([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag, 'ja'))
+}
+
+// チップ1つ分の条件を外したフィルターを返す（HPは上限・下限をまとめて解除）
+export function removeFilterChip(filters: CardFilters, category: keyof CardFilters, value: string): CardFilters {
+  if (category === 'hpMin') return { ...filters, hpMin: '', hpMax: '' }
+  const current = filters[category] as string[]
+  return { ...filters, [category]: current.filter((v) => v !== value) }
+}
+
 export function distinctBatonTouch(cards: Card[]): number[] {
   const set = new Set<number>()
   cards.forEach((c) => set.add(batonTouchValue(c)))
   return Array.from(set).sort((a, b) => a - b)
 }
 
+// ---- カード色 ----
+// 属性は「赤」のような1色、「無色」、複数色の「多色[赤青]」のいずれか。
+const BASE_COLORS = ['白', '緑', '赤', '青', '紫', '黄']
+// フィルターに並べるカード色の順番
+const ATTRIBUTE_ORDER = [...BASE_COLORS, '多色', '無色', 'その他']
+
+// 複数色の属性から、含まれる色を取り出す。「多色[赤青]」のほか、過去に入れた「白/緑」「白・緑」の形も読み取る
+function multiColorParts(attribute: string): string[] {
+  const m = attribute.match(/^多色\[(.*)\]$/)
+  if (m) return Array.from(m[1] ?? '').filter((ch) => BASE_COLORS.includes(ch))
+  const parts = attribute.split(/[\s/／・,、+＋]+/).filter(Boolean)
+  return parts.length >= 2 && parts.every((p) => BASE_COLORS.includes(p)) ? parts : []
+}
+
+// 属性をフィルターの選択肢（白・緑・…・多色・無色・その他）のどれに当たるかに直す
+function attributeBucket(attribute: string | null | undefined): string | null {
+  const a = (attribute ?? '').trim()
+  if (!a) return null
+  if (a.startsWith('多色') || multiColorParts(a).length >= 2) return '多色'
+  if (a === '無色') return '無色'
+  if (BASE_COLORS.includes(a)) return a
+  return 'その他'
+}
+
+// 属性がフィルターの選択肢vに当てはまるか。
+// 「赤」を選ぶと、赤を含む多色カード（多色[赤青]など）も表示する。「多色」はすべての多色カードが対象
+function attributeMatches(attribute: string | null | undefined, v: string): boolean {
+  const a = (attribute ?? '').trim()
+  if (!a) return false
+  if (v === '多色') return attributeBucket(a) === '多色'
+  if (BASE_COLORS.includes(v)) return a === v || multiColorParts(a).includes(v)
+  return attributeBucket(a) === v
+}
+
 export function distinctAttributes(cards: Card[]): string[] {
-  return sortJa(Array.from(new Set(cards.map((c) => c.attribute).filter((v): v is string => !!v))))
+  const present = new Set<string>()
+  cards.forEach((c) => {
+    const b = attributeBucket(c.attribute)
+    if (b) present.add(b)
+  })
+  return ATTRIBUTE_ORDER.filter((v) => present.has(v))
+}
+
+// ---- カード種類 ----
+// 推しホロメン → ホロメン → Buzzホロメン → サポート（イベント・アイテム・スタッフ・ツール・ファン・マスコット）→ エール
+const CARD_TYPE_ORDER = [
+  '推しホロメン',
+  'ホロメン',
+  'Buzzホロメン',
+  'サポート・イベント',
+  'サポート・アイテム',
+  'サポート・スタッフ',
+  'サポート・ツール',
+  'サポート・ファン',
+  'サポート・マスコット',
+  'エール',
+]
+
+function cardTypeRank(t: string): number {
+  const exact = CARD_TYPE_ORDER.indexOf(t)
+  if (exact !== -1) return exact
+  // 「サポート」だけなど、細かい種類が付いていないものは、サポートのグループの先頭に置く
+  if (t.startsWith('サポート')) return CARD_TYPE_ORDER.indexOf('サポート・イベント') - 0.5
+  return CARD_TYPE_ORDER.length // 上にない種類は最後に
 }
 
 export function distinctCardTypes(cards: Card[]): string[] {
-  return sortJa(Array.from(new Set(cards.map((c) => c.card_type).filter((v): v is string => !!v))))
+  const values = Array.from(new Set(cards.map((c) => c.card_type).filter((v): v is string => !!v)))
+  return values.sort((a, b) => cardTypeRank(a) - cardTypeRank(b) || a.localeCompare(b, 'ja'))
+}
+
+// ---- 進化レベル ----
+const STAGE_ORDER = ['debut', '1st', '2nd', 'spot']
+
+function stageRank(s: string): number {
+  const i = STAGE_ORDER.indexOf(s.trim().toLowerCase())
+  return i === -1 ? STAGE_ORDER.length : i
 }
 
 export function distinctStages(cards: Card[]): string[] {
-  return sortJa(Array.from(new Set(cards.map((c) => c.stage).filter((v): v is string => !!v))))
+  const values = Array.from(new Set(cards.map((c) => c.stage).filter((v): v is string => !!v)))
+  return values.sort((a, b) => stageRank(a) - stageRank(b) || a.localeCompare(b, 'ja'))
 }
 
 // カードが実際に持っているHPの最小・最大値（スライダーの可動域に使う）。カードが無ければ既定で0〜200
@@ -113,7 +199,7 @@ function activeChecks(c: Card, filters: CardFilters): boolean[] {
   filters.skillTypes.forEach((v) => checks.push(cardSkillTypes(c).includes(v)))
   filters.tags.forEach((v) => checks.push(splitTags(c.tags).includes(v)))
   filters.batonTouches.forEach((v) => checks.push(String(batonTouchValue(c)) === v))
-  filters.attributes.forEach((v) => checks.push(c.attribute === v))
+  filters.attributes.forEach((v) => checks.push(attributeMatches(c.attribute, v)))
   filters.cardTypes.forEach((v) => checks.push(c.card_type === v))
   filters.stages.forEach((v) => checks.push(c.stage === v))
   filters.setCodes.forEach((v) => checks.push(c.set_code === v))

@@ -7,7 +7,7 @@ import { useCardSearch } from '../hooks/useCardSearch'
 import { sortCards, type SortKey, type SortDir } from '../utils/sortCards'
 import { applyCardFilters, hasActiveFilters, activeFilterChips, EMPTY_FILTERS, type CardFilters } from '../utils/cardFilters'
 import { CardGrid } from '../components/CardGrid'
-import { CardFilterPanel } from '../components/CardFilterPanel'
+import { CardFilterPanel, ActiveFilterChips } from '../components/CardFilterPanel'
 import { CardModal } from '../components/CardModal'
 import { SiteNav } from '../components/SiteNav'
 import { FilterIcon } from '../components/FilterIcon'
@@ -127,32 +127,57 @@ export function SearchPage() {
 
       {controlsOpen && (
         <section className="hud-panel mobileBleed" style={{ padding: 'clamp(10px, 3vw, 16px)', marginBottom: 20 }}>
-          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
-            <input
-              className="field"
-              type="text"
-              placeholder="カード名・タグ・キーワードで検索（全弾対象）"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              style={{ flex: '1 1 240px', minWidth: 160 }}
-            />
-
+          {/* 検索と、フィルターの開閉ボタン */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ position: 'relative', flex: '1 1 auto', minWidth: 0 }}>
+              <input
+                className="field"
+                type="text"
+                placeholder="カード名・タグ・キーワードで検索（全弾対象）"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                style={{ width: '100%', minHeight: 40, paddingRight: 36 }}
+              />
+              {searchQuery && (
+                <button type="button" aria-label="検索語を消す" onClick={() => setSearchQuery('')} style={{ position: 'absolute', right: 2, top: '50%', transform: 'translateY(-50%)', width: 32, height: 32, background: 'transparent', border: 'none', color: 'var(--hud-ink-dim)', fontSize: 18, cursor: 'pointer' }}>
+                  ×
+                </button>
+              )}
+            </div>
             <button
               className={filterPanelOpen || hasActiveFilters(filters) ? 'btn-primary' : 'btn-secondary'}
               onClick={() => setFilterPanelOpen((v) => !v)}
               title="絞り込みフィルター"
               aria-label="絞り込みフィルター"
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              aria-expanded={filterPanelOpen}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flex: '0 0 auto', minHeight: 40 }}
             >
-              <FilterIcon /> フィルター{hasActiveFilters(filters) ? `（${activeFilterChips(filters).length}）` : ''}
+              <FilterIcon />
+              {!isMobile && 'フィルター'}
+              {hasActiveFilters(filters) && (
+                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 18, height: 18, padding: '0 5px', borderRadius: 999, background: '#04232a', color: 'var(--hud-cyan)', fontSize: 11, fontWeight: 700 }}>
+                  {activeFilterChips(filters).length}
+                </span>
+              )}
             </button>
           </div>
 
-          {filterPanelOpen && (
-            <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--hud-line)' }}>
-              <CardFilterPanel cards={cards} filters={filters} onChange={setFilters} sets={sets} onClose={() => setFilterPanelOpen(false)} />
+          {/* 選択中のフィルター条件。フィルターを開かなくても、ここから外せる */}
+          {hasActiveFilters(filters) && (
+            <div style={{ marginTop: 10 }}>
+              <ActiveFilterChips filters={filters} onChange={setFilters} />
             </div>
           )}
+
+          {/* 絞り込みフィルター：スマホは画面下のシート、PCはこの下に開く */}
+          {filterPanelOpen &&
+            (isMobile ? (
+              <CardFilterPanel asSheet cards={cards} filters={filters} onChange={setFilters} sets={sets} resultCount={sorted.length} onClose={() => setFilterPanelOpen(false)} />
+            ) : (
+              <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--hud-line)' }}>
+                <CardFilterPanel cards={cards} filters={filters} onChange={setFilters} sets={sets} resultCount={sorted.length} onClose={() => setFilterPanelOpen(false)} />
+              </div>
+            ))}
         </section>
       )}
 

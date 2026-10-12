@@ -16,12 +16,18 @@ type Props = {
   groupWithSet?: boolean // カード番号順で、パックをまたいでまとめて表示するとき、見出しに弾コードも付ける
 }
 
-// 区切り線に付けるタグの短い文字（「レアリティ SR」→「SR」、「HP 90」→「HP90」、「その他（漢字など）」→「他」）
-function chipText(label: string): string {
-  return label
+// 区切り線に付けるタグの文字を、横に長くならないよう行に分ける
+// （「hBP01 新規」→「hBP01」「新規」、「HP 90」→「HP」「90」、「レアリティ SR」→「SR」、「その他（漢字など）」→「その他」）
+function chipLines(label: string): string[] {
+  if (label === 'レアリティなし') return ['レア', 'なし']
+  if (label === 'HPなし') return ['HP', 'なし']
+  if (/^その他/.test(label)) return ['その他']
+  const lines = label
     .replace(/^レアリティ\s?/, '')
-    .replace(/^HP\s/, 'HP')
-    .replace(/^その他（漢字など）$/, '他')
+    .split(/\s+/)
+    .filter(Boolean)
+  // 1行が長すぎる場合（5文字を超える）は、5文字ずつに折り返す
+  return lines.flatMap((line) => (line.length > 5 ? (line.match(/.{1,5}/g) ?? [line]) : [line]))
 }
 
 export function CardGrid({ cards, onCardClick, isFav, onToggleFav, selectionMode, selectedIds, onToggleSelect, tileScale = 1, sortKey, groupWithSet }: Props) {
@@ -67,17 +73,19 @@ export function CardGrid({ cards, onCardClick, isFav, onToggleFav, selectionMode
                     top: '50%',
                     left: '50%',
                     transform: 'translate(-50%, -50%)',
-                    padding: layout.compact ? '2px 5px' : '3px 8px',
+                    // 文字サイズはカードのズームに合わせる。余白も文字の大きさに比例させる
+                    padding: `${Math.max(1, Math.round(layout.chipFont * 0.18))}px ${Math.max(2, Math.round(layout.chipFont * 0.4))}px`,
                     borderRadius: 5,
                     background: 'var(--hud-cyan)',
                     color: '#04232a',
-                    fontSize: layout.compact ? 12 : 16,
+                    fontSize: layout.chipFont,
                     fontWeight: 800,
-                    lineHeight: 1.1,
-                    whiteSpace: 'nowrap',
+                    lineHeight: 1.15,
+                    textAlign: 'center',
+                    whiteSpace: 'pre',
                   }}
                 >
-                  {chipText(label!)}
+                  {chipLines(label!).join('\n')}
                 </span>
               </span>
             )}

@@ -25,9 +25,12 @@ function colorRank(attribute: string | null | undefined): number {
   const a = (attribute || '').trim()
   const exact = COLOR_ORDER.indexOf(a)
   if (exact !== -1) return exact
+  // 色の順番は、白・緑・赤・青・紫・黄 の次が 多色、その次が 無色、それ以外は最後
+  if (a.startsWith('多色')) return COLOR_ORDER.length
+  if (a === '無色') return COLOR_ORDER.length + 1
   // 「白/緑」のように複数の色が入っている場合は、並び順が先の色として扱う
   const found = COLOR_ORDER.findIndex((c) => a.includes(c))
-  return found !== -1 ? found : COLOR_ORDER.length
+  return found !== -1 ? found : COLOR_ORDER.length + 2
 }
 
 // カードの種類の並び順: 推しホロメン → ホロメン → サポート（その他）
@@ -80,7 +83,10 @@ export function sortCards(cards: Card[], key: SortKey, dir: SortDir): Card[] {
   } else if (key === 'hp') {
     list = [...cards].sort((a, b) => (Number(a.hp) || 0) - (Number(b.hp) || 0) || byNameJa(a, b))
   } else {
-    list = [...cards].sort((a, b) => Number(a.slot) - Number(b.slot))
+    // パックセットで複数パックのカードが混ざる場合に備え、パック（弾コード）の順 → スロット番号の順で並べる
+    list = [...cards].sort(
+      (a, b) => (a.set_code || '').localeCompare(b.set_code || '', undefined, { numeric: true }) || Number(a.slot) - Number(b.slot)
+    )
   }
   if (dir === 'desc') list.reverse()
   return list

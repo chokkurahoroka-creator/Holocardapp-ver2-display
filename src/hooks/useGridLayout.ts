@@ -26,6 +26,7 @@ export type GridLayout = {
   gap: number
   compact: boolean // trueのとき、タイル下部のテキスト情報を省いてコンパクトに表示する
   hideFav: boolean // trueのとき、カードが小さすぎるので、お気に入りの★ボタンを出さない
+  chipFont: number // 並び替えの区切り線に付けるタグの文字サイズ（px）。カードのズームに合わせて変わる
 }
 
 // カード一覧グリッドの列構成。表示サイズ倍率（右下の＋/−ボタン）に応じて変わる。
@@ -43,6 +44,8 @@ export function useGridLayout(tileScale: number): GridLayout {
       compact: columns >= 3,
       // 5列以上（既定の4列より小さく表示）になったら、★は小さすぎて押しにくく、画像も隠すので非表示にする
       hideFav: columns >= 5,
+      // 列が増えるほど（カードが小さいほど）、文字も小さくする：3列=16px、4列=13px、5列=10px、6列以上=9px以下
+      chipFont: Math.max(7, Math.min(16, Math.round(52 / columns))),
     }
   }
 
@@ -51,5 +54,6 @@ export function useGridLayout(tileScale: number): GridLayout {
     gap: 12,
     compact: tileScale < 0.75,
     hideFav: tileScale < 0.6,
+    chipFont: Math.max(9, Math.min(18, Math.round(16 * tileScale))),
   }
 }
