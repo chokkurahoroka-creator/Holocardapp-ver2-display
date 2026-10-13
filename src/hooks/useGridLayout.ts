@@ -27,6 +27,8 @@ export type GridLayout = {
   compact: boolean // trueのとき、タイル下部のテキスト情報を省いてコンパクトに表示する
   hideFav: boolean // trueのとき、カードが小さすぎるので、お気に入りの★ボタンを出さない
   chipFont: number // 並び替えの区切り線に付けるタグの文字サイズ（px）。カードのズームに合わせて変わる
+  columns: number | null // スマホの列数（PCは表示幅で決まるので null）
+  tileMin: number // PCのカード1枚の最小幅（px）。スマホでは使わない
 }
 
 // カード一覧グリッドの列構成。表示サイズ倍率（右下の＋/−ボタン）に応じて変わる。
@@ -46,14 +48,21 @@ export function useGridLayout(tileScale: number): GridLayout {
       hideFav: columns >= 5,
       // 列が増えるほど（カードが小さいほど）、文字も小さくする：3列=16px、4列=13px、5列=10px、6列以上=9px以下
       chipFont: Math.max(7, Math.min(16, Math.round(52 / columns))),
+      columns,
+      tileMin: 0,
     }
   }
 
+  // 下のCSSの clamp(最小, 40vw, 最大) と同じ値（横に並べるブロックの列数の計算に使う）
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 1200
+  const tileMin = Math.max(Math.round(110 * tileScale), Math.min(vw * 0.4, Math.round(160 * tileScale)))
   return {
     gridTemplateColumns: `repeat(auto-fill, minmax(clamp(${Math.round(110 * tileScale)}px, 40vw, ${Math.round(160 * tileScale)}px), 1fr))`,
     gap: 12,
     compact: tileScale < 0.75,
     hideFav: tileScale < 0.6,
     chipFont: Math.max(9, Math.min(18, Math.round(16 * tileScale))),
+    columns: null,
+    tileMin,
   }
 }

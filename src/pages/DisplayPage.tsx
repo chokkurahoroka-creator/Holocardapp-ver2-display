@@ -5,11 +5,13 @@ import { useAllCards } from '../hooks/useAllCards'
 import { usePackSets } from '../hooks/usePackSets'
 import { useIsMobile } from '../hooks/useGridLayout'
 import { buildPackGroups, resolveGroupKey, defaultGroupKey, RECENT_GROUP_KEY, type PackGroup } from '../utils/packGroups'
+import { setLabel } from '../utils/setLabel'
 import { buildRecentCards, groupByRegisteredDay, RECENT_CARD_LIMIT } from '../utils/recentCards'
 import { useCardSearch } from '../hooks/useCardSearch'
 import { useSiteStatus } from '../hooks/useSiteStatus'
 import { sortCards, type SortKey, type SortDir } from '../utils/sortCards'
 import { CardGrid } from '../components/CardGrid'
+import { RecentDayGrid } from '../components/RecentDayGrid'
 import { SlotGrid, orderSlotCards } from '../components/SlotGrid'
 import { CardFilterPanel, ActiveFilterChips } from '../components/CardFilterPanel'
 import { FilterIcon } from '../components/FilterIcon'
@@ -99,7 +101,7 @@ export function DisplayPage() {
   const sorted = sortCards(searched, effectiveSortKey, effectiveSortDir)
   const groupedByType = groupCardsByType(sorted)
   const dayGroups = isRecent ? groupByRegisteredDay(sorted) : []
-  const setNameByCode = new Map(sets.map((s) => [s.set_code, s.set_name] as const))
+  const setNameByCode = new Map(sets.map((s) => [s.set_code, setLabel(s)] as const))
 
   // 空き枠は区分ごとのスロット番号（slot）で1〜設定枚数まで表示する（通し番号は使わない）
   // 検索中や、枠番号順以外の並び替えをしているときは「空いている枠」の概念がそのままでは意味を持たないため、
@@ -402,19 +404,33 @@ export function DisplayPage() {
                     {day.cards.length} ITEMS
                   </span>
                 </h3>
-                <CardGrid
-                  cards={day.cards}
-                  onCardClick={handleCardClick}
-                  isFav={(c) => isFav(c, activeGroup)}
-                  onToggleFav={handleToggleFav}
-                  selectionMode={selectionMode}
-                  selectedIds={selectedIds}
-                  onToggleSelect={handleToggleSelect}
-                  tileScale={cardScale}
-                  // 日ごとの中を、パック（弾）ごとに区切り線で分ける（枠番号順＝既定のとき）。ほかの並びのときは、その並びの区切りにする
-                  sortKey={sortKey === 'slot' ? undefined : sortKey}
-                  groupLabelFor={sortKey === 'slot' ? (c) => setNameByCode.get(c.set_code) ?? null : undefined}
-                />
+                {sortKey === 'slot' ? (
+                  // 日ごとの中を、パック（弾）ごとのブロックにして、横に並べる（既定の並び）
+                  <RecentDayGrid
+                    cards={day.cards}
+                    setNameByCode={setNameByCode}
+                    onCardClick={handleCardClick}
+                    isFav={(c) => isFav(c, activeGroup)}
+                    onToggleFav={handleToggleFav}
+                    selectionMode={selectionMode}
+                    selectedIds={selectedIds}
+                    onToggleSelect={handleToggleSelect}
+                    tileScale={cardScale}
+                  />
+                ) : (
+                  // レアリティ・HPなどの並びに変えたときは、その並びの区切り線で分ける
+                  <CardGrid
+                    cards={day.cards}
+                    onCardClick={handleCardClick}
+                    isFav={(c) => isFav(c, activeGroup)}
+                    onToggleFav={handleToggleFav}
+                    selectionMode={selectionMode}
+                    selectedIds={selectedIds}
+                    onToggleSelect={handleToggleSelect}
+                    tileScale={cardScale}
+                    sortKey={sortKey}
+                  />
+                )}
               </div>
             ))
           : showEmptySlots
@@ -459,7 +475,7 @@ export function DisplayPage() {
                     {extraPacks.map((x) => (
                       <div key={x.set.set_code} style={{ marginTop: 16 }}>
                         <div className="hud-mono" style={{ fontSize: 12, color: 'var(--hud-cyan)', marginBottom: 8 }}>
-                          ▶ {x.set.set_name}
+                          ▶ {setLabel(x.set)}
                           <span style={{ marginLeft: 8, color: 'var(--hud-ink-dim)' }}>{x.cards.length} ITEMS</span>
                         </div>
                         <CardGrid

@@ -1,3 +1,4 @@
+import { setLabel } from './setLabel'
 import type { PackSet, SetInfo } from '../types/card'
 
 // 「新着カード」を表す、特別なグループのキー（パックの選択リストの先頭に出す）
@@ -38,7 +39,7 @@ export function buildPackGroups(sets: SetInfo[], packSets: PackSet[], opts: { on
         groups.set(key, {
           key,
           // 一覧には弾コード（パック番号）を出さず、パックの名前だけを表示する
-          name: ps ? ps.name : s.set_name,
+          name: ps ? ps.name : setLabel(s),
           imageUrl: s.pack_image_url,
           sets: [s],
         })

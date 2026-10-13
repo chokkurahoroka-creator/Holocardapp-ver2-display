@@ -3,6 +3,7 @@ import type { CSSProperties, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { Card } from '../types/card'
 import { useIsMobile } from '../hooks/useGridLayout'
+import { setLabel } from '../utils/setLabel'
 import {
   activeFilterChips,
   distinctAttributes,
@@ -22,7 +23,7 @@ type Props = {
   cards: Card[] // 選択肢を作るのに使うカード一覧（全カード検索なら全カード、カード一覧なら選択中の弾のカード）
   filters: CardFilters
   onChange: (filters: CardFilters) => void
-  sets?: { set_code: string; set_name: string }[] // 指定した場合のみ「パック」の絞り込みも表示する
+  sets?: { set_code: string; set_name: string; display_name?: string | null }[] // 指定した場合のみ「パック」の絞り込みも表示する
   onClose?: () => void
   resultCount?: number // 今の条件で表示されるカード枚数（「◯件を表示」ボタンと見出しに出す）
   asSheet?: boolean // true のとき、画面下から出てくるシート（スマホ向け）として表示する
@@ -460,7 +461,7 @@ export function CardFilterPanel({ cards, filters, onChange, sets, onClose, resul
             <option value="">すべてのパック</option>
             {sets.map((s) => (
               <option key={s.set_code} value={s.set_code}>
-                {s.set_name}
+                {setLabel(s)}
               </option>
             ))}
           </select>

@@ -36,6 +36,7 @@ export type Card = {
 export type SetInfo = {
   set_code: string
   set_name: string
+  display_name?: string | null // 表示名（弾名が長いときの短い名前）。画面にはこちらを優先して出す
   total_new: number
   total_rerun: number
   total_parallel: number

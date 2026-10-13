@@ -15,6 +15,7 @@ type Props = {
   sortKey?: SortKey // 並び替えキー。レアリティ・HP・カード名・カード番号順のときは、区切りの見出しを入れる
   groupWithSet?: boolean // カード番号順で、パックをまたいでまとめて表示するとき、見出しに弾コードも付ける
   groupLabelFor?: (card: Card) => string | null // 区切りの見出しを、カードごとに直接指定する（指定すると sortKey による見出しより優先）
+  fixedColumns?: number // 列数を指定する（横に並べるブロックの中で使う。指定しないときは、表示サイズに合わせた列数）
 }
 
 // 区切り線に付けるタグの文字を、横に長くならないよう行に分ける
@@ -31,14 +32,14 @@ function chipLines(label: string): string[] {
   return lines.flatMap((line) => (line.length > 5 ? (line.match(/.{1,5}/g) ?? [line]) : [line]))
 }
 
-export function CardGrid({ cards, onCardClick, isFav, onToggleFav, selectionMode, selectedIds, onToggleSelect, tileScale = 1, sortKey, groupWithSet, groupLabelFor }: Props) {
+export function CardGrid({ cards, onCardClick, isFav, onToggleFav, selectionMode, selectedIds, onToggleSelect, tileScale = 1, sortKey, groupWithSet, groupLabelFor, fixedColumns }: Props) {
   // PCは最小タイル幅ベースの自動列数、スマホは倍率1で4列（詳細はuseGridLayout）
   const layout = useGridLayout(tileScale)
   return (
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: layout.gridTemplateColumns,
+        gridTemplateColumns: fixedColumns ? `repeat(${fixedColumns}, minmax(0, 1fr))` : layout.gridTemplateColumns,
         gap: layout.gap,
       }}
     >

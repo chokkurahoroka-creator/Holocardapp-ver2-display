@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import { useSets } from '../hooks/useSets'
+import { setLabel } from '../utils/setLabel'
 import { useCards } from '../hooks/useCards'
 import { useSiteStatus } from '../hooks/useSiteStatus'
 import { useUserCollection } from '../hooks/useUserCollection'
@@ -83,7 +84,7 @@ export function CardPoolPage() {
           <option value="">弾を選択してください</option>
           {sets.map((s) => (
             <option key={s.set_code} value={s.set_code}>
-              {s.set_code}（{s.set_name}）
+              {s.set_code}（{setLabel(s)}）
             </option>
           ))}
         </select>
