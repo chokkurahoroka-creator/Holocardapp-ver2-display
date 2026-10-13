@@ -20,7 +20,7 @@ import type { Card } from '../types/card'
 const LIST_VIEW = 'cards_list'
 const PAGE_SIZE = 1000 // Supabase(PostgREST)は1回で最大1000行まで
 const CACHE_KEY = 'all-cards'
-const CACHE_SCHEMA = 1 // 保存形式を変えたときに上げると、古い保存データは使われない
+const CACHE_SCHEMA = 2 // 保存形式を変えたときに上げると、古い保存データは使われない
 
 type CachedCards = { schema: number; latest: string; cards: Card[] }
 type Row = Record<string, unknown>

@@ -14,6 +14,7 @@ type Props = {
   tileScale?: number // 右下の表示サイズ変更ボタンから渡される倍率（既定1）
   sortKey?: SortKey // 並び替えキー。レアリティ・HP・カード名・カード番号順のときは、区切りの見出しを入れる
   groupWithSet?: boolean // カード番号順で、パックをまたいでまとめて表示するとき、見出しに弾コードも付ける
+  groupLabelFor?: (card: Card) => string | null // 区切りの見出しを、カードごとに直接指定する（指定すると sortKey による見出しより優先）
 }
 
 // 区切り線に付けるタグの文字を、横に長くならないよう行に分ける
@@ -30,7 +31,7 @@ function chipLines(label: string): string[] {
   return lines.flatMap((line) => (line.length > 5 ? (line.match(/.{1,5}/g) ?? [line]) : [line]))
 }
 
-export function CardGrid({ cards, onCardClick, isFav, onToggleFav, selectionMode, selectedIds, onToggleSelect, tileScale = 1, sortKey, groupWithSet }: Props) {
+export function CardGrid({ cards, onCardClick, isFav, onToggleFav, selectionMode, selectedIds, onToggleSelect, tileScale = 1, sortKey, groupWithSet, groupLabelFor }: Props) {
   // PCは最小タイル幅ベースの自動列数、スマホは倍率1で4列（詳細はuseGridLayout）
   const layout = useGridLayout(tileScale)
   return (
@@ -43,8 +44,9 @@ export function CardGrid({ cards, onCardClick, isFav, onToggleFav, selectionMode
     >
       {cards.map((card, index) => {
         // 並び替えの区切り: 前のカードと見出しが変わったカードの左側（カードとカードの間）に縦の区切り線を引く
-        const label = sortKey ? getSortGroupLabel(card, sortKey, { withSet: groupWithSet }) : null
-        const prevLabel = sortKey && index > 0 ? getSortGroupLabel(cards[index - 1]!, sortKey, { withSet: groupWithSet }) : null
+        const labelOf = (c: Card) => (groupLabelFor ? groupLabelFor(c) : sortKey ? getSortGroupLabel(c, sortKey, { withSet: groupWithSet }) : null)
+        const label = labelOf(card)
+        const prevLabel = index > 0 ? labelOf(cards[index - 1]!) : null
         const startsGroup = label !== null && (index === 0 || label !== prevLabel)
         return (
           <div key={card.id} style={{ position: 'relative' }}>

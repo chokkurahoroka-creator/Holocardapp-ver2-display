@@ -99,6 +99,7 @@ export function DisplayPage() {
   const sorted = sortCards(searched, effectiveSortKey, effectiveSortDir)
   const groupedByType = groupCardsByType(sorted)
   const dayGroups = isRecent ? groupByRegisteredDay(sorted) : []
+  const setNameByCode = new Map(sets.map((s) => [s.set_code, s.set_name] as const))
 
   // 空き枠は区分ごとのスロット番号（slot）で1〜設定枚数まで表示する（通し番号は使わない）
   // 検索中や、枠番号順以外の並び替えをしているときは「空いている枠」の概念がそのままでは意味を持たないため、
@@ -410,8 +411,9 @@ export function DisplayPage() {
                   selectedIds={selectedIds}
                   onToggleSelect={handleToggleSelect}
                   tileScale={cardScale}
-                  // 複数のパックが混ざるため、枠番号順（既定）のときは区切り線を出さない
+                  // 日ごとの中を、パック（弾）ごとに区切り線で分ける（枠番号順＝既定のとき）。ほかの並びのときは、その並びの区切りにする
                   sortKey={sortKey === 'slot' ? undefined : sortKey}
+                  groupLabelFor={sortKey === 'slot' ? (c) => setNameByCode.get(c.set_code) ?? null : undefined}
                 />
               </div>
             ))

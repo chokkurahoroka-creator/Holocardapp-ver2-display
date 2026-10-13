@@ -43,6 +43,14 @@ export function formatDayLabel(key: string): string {
   })
 }
 
+// 重複判定用に、全角・半角、大文字・小文字、空白の違いをそろえる
+function normalizeKey(value: unknown): string {
+  return String(value ?? '')
+    .normalize('NFKC')
+    .replace(/\s+/g, '')
+    .toLowerCase()
+}
+
 // 同じカードの重複表示をまとめるときに、どれを残すかの優先順（小さいほど優先）。新規 → 再録 → パラレル
 function typeRank(type: string): number {
   const i = ['新規', '再録', 'パラレル'].indexOf(type)
@@ -66,13 +74,14 @@ export function buildRecentCards(allCards: Card[], publicSetCodes: string[]): Ca
   const result: Card[] = []
   const seen = new Map<string, number>() // 重複の判定キー → result内の位置
   for (const { card } of sorted) {
-    const original = (card.original_number ?? '').trim()
+    const original = normalizeKey(card.original_number)
     // オリジナル番号が無いカードは、同じカードかどうか判断できないため、まとめない
     if (!original) {
       result.push(card)
       continue
     }
-    const key = `${registeredDayKey(card)}|${original}|${(card.card_name ?? '').trim()}`
+    // 日付だけで比べる（時刻は見ない）
+    const key = `${registeredDayKey(card)}|${original}|${normalizeKey(card.card_name)}`
     const at = seen.get(key)
     if (at === undefined) {
       seen.set(key, result.length)
