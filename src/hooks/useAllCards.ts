@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react'
 import { loadAllCards } from '../lib/fetchAllCards'
 import type { Card } from '../types/card'
 
-export function useAllCards() {
+// enabled が false のあいだは、カードを取得しない（新着カードのときだけ全カードが必要、というような使い方のため）
+export function useAllCards(enabled = true) {
   const [cards, setCards] = useState<Card[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    if (!enabled) return
     let cancelled = false
     setLoading(true)
     // 端末に保存済みのカードがあれば先にそれを表示し、更新があった分だけ裏で取得して差し替える
@@ -31,7 +33,7 @@ export function useAllCards() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [enabled])
 
-  return { cards, loading }
+  return { cards, loading: enabled && loading }
 }

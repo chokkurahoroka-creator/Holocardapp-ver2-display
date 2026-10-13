@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useSets } from '../hooks/useSets'
 import { useCardsBySets } from '../hooks/useCardsBySets'
+import { useAllCards } from '../hooks/useAllCards'
 import { usePackSets } from '../hooks/usePackSets'
 import { useIsMobile } from '../hooks/useGridLayout'
-import { buildPackGroups, resolveGroupKey } from '../utils/packGroups'
+import { buildPackGroups, resolveGroupKey, defaultGroupKey, RECENT_GROUP_KEY, type PackGroup } from '../utils/packGroups'
+import { buildRecentCards, groupByRegisteredDay, RECENT_CARD_LIMIT } from '../utils/recentCards'
 import { useCardSearch } from '../hooks/useCardSearch'
 import { useSiteStatus } from '../hooks/useSiteStatus'
 import { sortCards, type SortKey, type SortDir } from '../utils/sortCards'
@@ -34,21 +36,33 @@ function groupCardsByType(cards: Card[]): { type: Card['type']; cards: Card[] }[
 }
 
 export function DisplayPage() {
-  const { sets } = useSets()
+  const { sets, loading: setsLoading } = useSets()
   const { packSets } = usePackSets()
   const isMobile = useIsMobile()
   // 選択中の「パックセット（または単独パック）」。以前の版では弾コードを保存していたため、保存値は弾コードでも受け付ける
   const [groupKey, setGroupKey] = useState<string | null>(() => localStorage.getItem(STORAGE_KEY))
   // パック選択リストは、管理画面で「公開中」に設定されているパックだけを、パックセットごとにまとめて表示する
   const groups = buildPackGroups(sets, packSets, { onlyPublic: true })
-  const activeKey = resolveGroupKey(groupKey, groups)
-  const group = groups.find((g) => g.key === activeKey) ?? null
+  // 選択リストの先頭は「新着カード」。続けて、公開中のパック（パック番号は出さず、パック名だけ）を並べる
+  const selectGroups: PackGroup[] = [{ key: RECENT_GROUP_KEY, name: '新着カード', imageUrl: null, sets: [] }, ...groups]
+  // 保存されている選択が無い（初めて開いた）ときや、その弾が非公開になったときは、管理画面で「デフォルト」にしたパックを開く。
+  // デフォルトのパックが無い（または非公開の）ときは「新着カード」。パック情報の読み込みが終わるまでは、決めずに待つ
+  const storedKey = groupKey === RECENT_GROUP_KEY ? RECENT_GROUP_KEY : resolveGroupKey(groupKey, groups)
+  const activeKey = setsLoading ? null : (storedKey ?? defaultGroupKey(groups))
+  const isRecent = activeKey === RECENT_GROUP_KEY
+  const group = isRecent ? null : (groups.find((g) => g.key === activeKey) ?? null)
   // 空き枠・設定枚数は、グループの代表パック（弾コードが最小のパック）の設定で表示する。追加パックのカードは続けて並べる
   const setInfo = group?.sets[0]
   const setCode = setInfo?.set_code ?? null
   const extraSets = group ? group.sets.slice(1) : []
   const memberCodes = group ? group.sets.map((s) => s.set_code) : []
-  const { cards, loading } = useCardsBySets(memberCodes)
+  const { cards: packCards, loading: packLoading } = useCardsBySets(memberCodes)
+  // 新着カードは、新カードページ公開中のパック全体から、登録日の新しい順に最新100枚を選ぶ
+  const { cards: allCards, loading: allLoading } = useAllCards(isRecent)
+  const publicCodesKey = sets.filter((s) => s.status === '公開中').map((s) => s.set_code).join(',')
+  const recentCards = useMemo(() => (isRecent ? buildRecentCards(allCards, publicCodesKey ? publicCodesKey.split(',') : []) : []), [isRecent, allCards, publicCodesKey])
+  const cards = isRecent ? recentCards : packCards
+  const loading = setsLoading || (isRecent ? allLoading : packLoading)
   const { status: siteStatus } = useSiteStatus()
   const isMaintenance = siteStatus[THIS_PAGE_KEY] === '作業中'
 
@@ -80,8 +94,11 @@ export function DisplayPage() {
   // 枠番号順は昇順固定（昇降順ボタンは無効）。降順の状態が残っていても、枠番号順では昇順で並べる
   const slotSort = sortKey === 'slot'
   const effectiveSortDir: SortDir = slotSort ? 'asc' : sortDir
-  const sorted = sortCards(searched, sortKey, effectiveSortDir)
+  // 新着カードは、枠番号順のとき、パックごとの枠番号ではなくカード番号順（パック→新規→再録→パラレル）で日ごとに並べる
+  const effectiveSortKey: SortKey = isRecent && sortKey === 'slot' ? 'overall' : sortKey
+  const sorted = sortCards(searched, effectiveSortKey, effectiveSortDir)
   const groupedByType = groupCardsByType(sorted)
+  const dayGroups = isRecent ? groupByRegisteredDay(sorted) : []
 
   // 空き枠は区分ごとのスロット番号（slot）で1〜設定枚数まで表示する（通し番号は使わない）
   // 検索中や、枠番号順以外の並び替えをしているときは「空いている枠」の概念がそのままでは意味を持たないため、
@@ -103,7 +120,9 @@ export function DisplayPage() {
     extraSets
       .map((s) => ({ set: s, cards: cards.filter((c) => c.type === type && c.set_code === s.set_code).sort(bySlot) }))
       .filter((x) => x.cards.length > 0)
-  const navCards: Card[] = showEmptySlots
+  const navCards: Card[] = isRecent
+    ? dayGroups.flatMap((d) => d.cards)
+    : showEmptySlots
     ? slotTypeConfig
         .filter((tc) => tc.count > 0 || cards.some((c) => c.type === tc.type))
         .flatMap((tc) => [...orderSlotCards(primaryCardsOf(tc.type), tc.count), ...extraPacksOf(tc.type).flatMap((x) => x.cards)])
@@ -225,7 +244,7 @@ export function DisplayPage() {
           onToggle={() => setControlsOpen((v) => !v)}
           active={!!searchQuery.trim() || hasActiveFilters(filters)}
         >
-          <PackSelect groups={groups} value={activeKey} onChange={setGroupKey} />
+          <PackSelect groups={selectGroups} value={activeKey} onChange={setGroupKey} />
 
           <select className="field" value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
             <option value="slot">枠番号順</option>
@@ -357,11 +376,46 @@ export function DisplayPage() {
         {/* 件数・読み込み状態 */}
         <div className="hud-mono" style={{ fontSize: 12, color: 'var(--hud-ink-dim)', marginBottom: 12 }}>
           {loading ? 'LOADING...' : `${sorted.length} ITEMS`}
+          {isRecent && !loading && <span style={{ marginLeft: 10 }}>新カードページ公開中のパックから、登録日の新しい順に最新{RECENT_CARD_LIMIT}枚まで</span>}
         </div>
 
         {/* 新規・再録・パラレルをそれぞれ別のセクションとして表示する。
             検索なし・枠番号順のときは、未登録の枠も「空き枠」としてその番号を表示する */}
-        {showEmptySlots
+        {isRecent
+          ? dayGroups.map((day) => (
+              <div key={day.key} style={{ marginBottom: 28 }}>
+                <h3
+                  className="hud-font"
+                  style={{
+                    fontSize: 14,
+                    fontWeight: 700,
+                    color: 'var(--hud-cyan)',
+                    borderLeft: '2px solid var(--hud-cyan)',
+                    paddingLeft: 8,
+                    marginBottom: 10,
+                    letterSpacing: '0.03em',
+                  }}
+                >
+                  {day.label}
+                  <span className="hud-mono" style={{ marginLeft: 8, fontSize: 11, color: 'var(--hud-ink-dim)', fontWeight: 400 }}>
+                    {day.cards.length} ITEMS
+                  </span>
+                </h3>
+                <CardGrid
+                  cards={day.cards}
+                  onCardClick={handleCardClick}
+                  isFav={(c) => isFav(c, activeGroup)}
+                  onToggleFav={handleToggleFav}
+                  selectionMode={selectionMode}
+                  selectedIds={selectedIds}
+                  onToggleSelect={handleToggleSelect}
+                  tileScale={cardScale}
+                  // 複数のパックが混ざるため、枠番号順（既定）のときは区切り線を出さない
+                  sortKey={sortKey === 'slot' ? undefined : sortKey}
+                />
+              </div>
+            ))
+          : showEmptySlots
           ? slotTypeConfig
               .filter((tc) => tc.count > 0 || cards.some((c) => c.type === tc.type))
               .map((tc) => {
@@ -403,7 +457,7 @@ export function DisplayPage() {
                     {extraPacks.map((x) => (
                       <div key={x.set.set_code} style={{ marginTop: 16 }}>
                         <div className="hud-mono" style={{ fontSize: 12, color: 'var(--hud-cyan)', marginBottom: 8 }}>
-                          ▶ {x.set.set_code}（{x.set.set_name}）
+                          ▶ {x.set.set_name}
                           <span style={{ marginLeft: 8, color: 'var(--hud-ink-dim)' }}>{x.cards.length} ITEMS</span>
                         </div>
                         <CardGrid

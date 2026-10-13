@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import type { PackGroup } from '../utils/packGroups'
+import { RECENT_GROUP_KEY, type PackGroup } from '../utils/packGroups'
 
 type Props = {
-  groups: PackGroup[] // 選択肢にするグループ（パックセット、またはパックセットに入っていない単独パック）
-  value: string | null // 選択中のグループのキー
-  onChange: (groupKey: string | null) => void
+  groups: PackGroup[] // 選択肢にするグループ（先頭は「新着カード」。続いて、パックセット、またはパックセットに入っていない単独パック）
+  value: string | null // 選択中のグループのキー（読み込み中だけ null）
+  onChange: (groupKey: string) => void
 }
 
 // パックのアイコン。画像が無い弾は空の枠を出して、行の高さ・文字位置が揃うようにする
@@ -31,6 +31,35 @@ function PackIcon({ url, size }: { url: string | null; size: number }) {
   )
 }
 
+// 「新着カード」用のアイコン
+function RecentIcon({ size }: { size: number }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="hud-mono"
+      style={{
+        width: Math.round(size * 0.78),
+        height: size,
+        flexShrink: 0,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: 3,
+        background: 'var(--hud-cyan)',
+        color: '#04232a',
+        fontSize: Math.max(8, Math.round(size * 0.34)),
+        fontWeight: 800,
+      }}
+    >
+      NEW
+    </span>
+  )
+}
+
+function GroupIcon({ g, size }: { g: PackGroup; size: number }) {
+  return g.key === RECENT_GROUP_KEY ? <RecentIcon size={size} /> : <PackIcon url={g.imageUrl} size={size} />
+}
+
 // 弾の選択（パック名の前にアイコン画像を表示する）。
 // <select>の<option>には画像を入れられないため、ボタン＋一覧の自前ドロップダウンにしている
 export function PackSelect({ groups, value, onChange }: Props) {
@@ -55,7 +84,7 @@ export function PackSelect({ groups, value, onChange }: Props) {
     }
   }, [open])
 
-  const choose = (key: string | null) => {
+  const choose = (key: string) => {
     onChange(key)
     setOpen(false)
   }
@@ -86,9 +115,9 @@ export function PackSelect({ groups, value, onChange }: Props) {
         aria-expanded={open}
         style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', cursor: 'pointer' }}
       >
-        {selected && <PackIcon url={selected.imageUrl} size={22} />}
+        {selected && <GroupIcon g={selected} size={22} />}
         <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {selected ? selected.name : '弾を選択してください'}
+          {selected ? selected.name : '読み込み中…'}
         </span>
         <span style={{ fontSize: 10, color: 'var(--hud-cyan)' }}>{open ? '▲' : '▼'}</span>
       </button>
@@ -111,10 +140,6 @@ export function PackSelect({ groups, value, onChange }: Props) {
             boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
           }}
         >
-          <button type="button" role="option" aria-selected={value === null} onClick={() => choose(null)} className="hud-mono" style={rowStyle(value === null)}>
-            <PackIcon url={null} size={34} />
-            弾を選択してください
-          </button>
           {groups.map((g) => (
             <button
               key={g.key}
@@ -125,15 +150,8 @@ export function PackSelect({ groups, value, onChange }: Props) {
               className="hud-mono"
               style={rowStyle(g.key === value)}
             >
-              <PackIcon url={g.imageUrl} size={34} />
-              <span style={{ flex: 1, minWidth: 0 }}>
-                {g.name}
-                {g.sets.length > 1 && (
-                  <span style={{ display: 'block', fontSize: 11, color: 'var(--hud-ink-dim)' }}>
-                    {g.sets.map((s) => s.set_code).join(' / ')}
-                  </span>
-                )}
-              </span>
+              <GroupIcon g={g} size={34} />
+              <span style={{ flex: 1, minWidth: 0 }}>{g.name}</span>
             </button>
           ))}
         </div>

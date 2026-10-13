@@ -1,5 +1,8 @@
 import type { PackSet, SetInfo } from '../types/card'
 
+// 「新着カード」を表す、特別なグループのキー（パックの選択リストの先頭に出す）
+export const RECENT_GROUP_KEY = '__recent__'
+
 // 公開側で「ひとまとまり」として扱うパックのグループ。
 // パックセットに入れたパックは1つのグループにまとめ、入れていないパックは1パックだけのグループにする。
 export type PackGroup = {
@@ -34,14 +37,21 @@ export function buildPackGroups(sets: SetInfo[], packSets: PackSet[], opts: { on
       } else {
         groups.set(key, {
           key,
-          name: ps ? ps.name : `${s.set_code}（${s.set_name}）`,
+          // 一覧には弾コード（パック番号）を出さず、パックの名前だけを表示する
+          name: ps ? ps.name : s.set_name,
           imageUrl: s.pack_image_url,
           sets: [s],
         })
       }
     })
 
-  return Array.from(groups.values()).sort((a, b) => a.name.localeCompare(b.name, 'ja'))
+  // 並びは、含まれる弾コードの小さい順（名前に弾コードを入れなくなったため、名前順ではなくコード順にする）
+  return Array.from(groups.values()).sort((a, b) => byCode(a.sets[0]!, b.sets[0]!))
+}
+
+// 初めて開いたときに選ぶグループ：管理画面のパック管理で「デフォルト」にしたパックを含むグループ。無ければ「新着カード」
+export function defaultGroupKey(groups: PackGroup[]): string {
+  return groups.find((g) => g.sets.some((s) => s.default_flag))?.key ?? RECENT_GROUP_KEY
 }
 
 // 保存されていた選択（以前の版では弾コード）を、今のグループのキーに直す。該当が無ければ null

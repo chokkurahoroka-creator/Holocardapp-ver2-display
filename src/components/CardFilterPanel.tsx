@@ -460,7 +460,7 @@ export function CardFilterPanel({ cards, filters, onChange, sets, onClose, resul
             <option value="">すべてのパック</option>
             {sets.map((s) => (
               <option key={s.set_code} value={s.set_code}>
-                {s.set_code}（{s.set_name}）
+                {s.set_name}
               </option>
             ))}
           </select>
