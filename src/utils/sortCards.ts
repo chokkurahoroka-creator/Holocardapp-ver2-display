@@ -13,7 +13,7 @@ function rarityOrderIndex(rarity: string | null): number {
   return idx === -1 ? RARITY_ORDER.indexOf('判別不能') : idx
 }
 
-// 'slot'  : 区分（新規/再録/パラレル）内のスロット番号順
+// 'slot'  : カード番号順（新規はスロット番号順、再録・パラレルは、種類・色・進化レベルなどの決まった順）
 // 'overall': 弾ごとの通し番号（overall_number）順（全カード検索のカード番号順）
 export type SortKey = 'slot' | 'overall' | 'rarity' | 'name' | 'hp'
 const TYPE_ORDER: Card['type'][] = ['新規', '再録', 'パラレル']
@@ -33,41 +33,90 @@ function colorRank(attribute: string | null | undefined): number {
   return found !== -1 ? found : COLOR_ORDER.length + 2
 }
 
-// カードの種類の並び順: 推しホロメン → ホロメン → サポート（その他）
+// カードの種類の並び順: 推しホロメン → ホロメン → サポート → エール
 function categoryRank(card: Card): number {
   const t = card.card_type || ''
   if (t.includes('推し') || /^O[A-Z]+$/i.test((card.rarity || '').trim())) return 0
   if (t.includes('ホロメン')) return 1
-  return 2
+  if (t.startsWith('エール')) return 3
+  return 2 // サポート（その他の種類も、ここに含める）
 }
 
-// カード番号順（全カード検索の既定）。弾ごとに次の順で並べる。
-//   新規: 番号順
-//   再録: 推しホロメン(白,緑,赤,青,紫,黄,その他) → ホロメン(同) → サポート
-//   パラレル: 再録と同じ並び
-// 各グループの中は通し番号の順（通し番号が未設定のカードは、スロット番号順で末尾）
-function byOverallNumber(a: Card, b: Card) {
-  const setCmp = (a.set_code || '').localeCompare(b.set_code || '')
-  if (setCmp !== 0) return setCmp
+// サポートの並び順: イベント → アイテム → ツール → マスコット → ファン → その他
+const SUPPORT_KEYWORDS = ['イベント', 'アイテム', 'ツール', 'マスコット', 'ファン']
 
-  const typeCmp = TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type)
-  if (typeCmp !== 0) return typeCmp
+function supportRank(card: Card): number {
+  const t = card.card_type || ''
+  const i = SUPPORT_KEYWORDS.findIndex((k) => t.includes(k))
+  return i === -1 ? SUPPORT_KEYWORDS.length : i
+}
 
-  if (a.type !== '新規') {
-    const catA = categoryRank(a)
-    const catB = categoryRank(b)
-    if (catA !== catB) return catA - catB
-    // サポートは色で分けない
-    if (catA !== 2) {
-      const colorCmp = colorRank(a.attribute) - colorRank(b.attribute)
-      if (colorCmp !== 0) return colorCmp
-    }
+// ホロメンの並び順: debut → 1st → 1stBuzz → 2nd（Buzzホロメンの1stが、1stBuzz）。それ以外の進化レベルは最後
+const STAGE_RANK: Record<string, number> = { debut: 0, '1st': 1, '2nd': 3, spot: 4 }
+
+function stageRank(card: Card): number {
+  const stage = (card.stage || '').trim().toLowerCase()
+  const base = STAGE_RANK[stage] ?? 5
+  if ((card.card_type || '') === 'Buzzホロメン') return stage === '1st' ? 2 : base + 0.25 // 1stBuzz は、1st と 2nd の間
+  return base
+}
+
+// 再録・パラレルの並び（レアリティを除く部分）
+//   第1: 推しホロメン → ホロメン → サポート → エール
+//   第2: 推しホロメン・ホロメン・エールは色（白,緑,赤,青,紫,黄,多色）、サポートは種類（イベント,アイテム,ツール,マスコット,ファン,その他）
+//   第3: ホロメンは進化レベル（debut,1st,1stBuzz,2nd）
+function byCategoryColorStage(a: Card, b: Card): number {
+  const catA = categoryRank(a)
+  const catB = categoryRank(b)
+  if (catA !== catB) return catA - catB
+  if (catA === 2) {
+    const supCmp = supportRank(a) - supportRank(b)
+    if (supCmp !== 0) return supCmp
+    return (a.card_type || '').localeCompare(b.card_type || '', 'ja') // 「その他」の中は、種類の名前順
   }
+  const colorCmp = colorRank(a.attribute) - colorRank(b.attribute)
+  if (colorCmp !== 0) return colorCmp
+  if (catA === 1) return stageRank(a) - stageRank(b)
+  return 0
+}
 
-  const an = a.overall_number ?? Number.POSITIVE_INFINITY
-  const bn = b.overall_number ?? Number.POSITIVE_INFINITY
-  if (an !== bn) return an < bn ? -1 : 1
-  return Number(a.slot) - Number(b.slot)
+// カード番号順。弾ごとに、次の順で並べる。
+//   新規: 番号順（useOverall=true なら通し番号、false ならスロット番号）
+//   再録: 上の「第1〜第3」の順
+//   パラレル: 第1にレアリティ（レアリティ順と同じ並び）、続けて「第1〜第3」の順
+// 同じ並びの中は、通し番号（未設定なら、スロット番号）の順
+function makeCardNumberComparator(useOverall: boolean) {
+  return (a: Card, b: Card): number => {
+    const setCmp = (a.set_code || '').localeCompare(b.set_code || '', undefined, { numeric: true })
+    if (setCmp !== 0) return setCmp
+
+    const typeCmp = TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type)
+    if (typeCmp !== 0) return typeCmp
+
+    if (a.type === 'パラレル') {
+      const rarityCmp = rarityOrderIndex(a.rarity) - rarityOrderIndex(b.rarity)
+      if (rarityCmp !== 0) return rarityCmp
+    }
+    if (a.type !== '新規') {
+      const ruleCmp = byCategoryColorStage(a, b)
+      if (ruleCmp !== 0) return ruleCmp
+    }
+
+    if (useOverall) {
+      const an = a.overall_number ?? Number.POSITIVE_INFINITY
+      const bn = b.overall_number ?? Number.POSITIVE_INFINITY
+      if (an !== bn) return an < bn ? -1 : 1
+    }
+    return Number(a.slot) - Number(b.slot)
+  }
+}
+
+const byOverallNumber = makeCardNumberComparator(true)
+const bySlotCardNumber = makeCardNumberComparator(false)
+
+// カード番号順（スロット番号ベース）に並べる。新規は番号順、再録・パラレルは上の決まりで並べる
+export function sortByCardNumber(cards: Card[]): Card[] {
+  return [...cards].sort(bySlotCardNumber)
 }
 
 export type SortDir = 'asc' | 'desc'
@@ -83,10 +132,9 @@ export function sortCards(cards: Card[], key: SortKey, dir: SortDir): Card[] {
   } else if (key === 'hp') {
     list = [...cards].sort((a, b) => (Number(a.hp) || 0) - (Number(b.hp) || 0) || byNameJa(a, b))
   } else {
-    // パックセットで複数パックのカードが混ざる場合に備え、パック（弾コード）の順 → スロット番号の順で並べる
-    list = [...cards].sort(
-      (a, b) => (a.set_code || '').localeCompare(b.set_code || '', undefined, { numeric: true }) || Number(a.slot) - Number(b.slot)
-    )
+    // カード番号順（既定）。パックセットで複数パックのカードが混ざる場合に備え、パック（弾コード）の順に並べ、
+    // 区分ごとに、新規は番号順、再録・パラレルは決まった並び（上の makeCardNumberComparator）にする
+    list = [...cards].sort(bySlotCardNumber)
   }
   if (dir === 'desc') list.reverse()
   return list
@@ -123,7 +171,7 @@ function nameGroupLabel(name: string | null): string {
 // 並び替えキーに応じた「区切りの見出し」。
 // カード番号順（overall）は、新規・再録・パラレルの区分ごとに区切る。パックをまたいでまとめて表示するとき
 // （withSet）は、パックが変わった所にも区切りが入るよう、見出しにパックの弾コードも付ける。
-// 枠番号順は区切り不要なので null
+// カード番号順（slot）は区切り不要なので null
 export function getSortGroupLabel(card: Card, key: SortKey, opts?: { withSet?: boolean }): string | null {
   if (key === 'overall') return `${opts?.withSet ? `${card.set_code} ` : ''}${card.type}`
   if (key === 'rarity') {

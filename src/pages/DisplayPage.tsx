@@ -9,7 +9,7 @@ import { setLabel } from '../utils/setLabel'
 import { buildRecentCards, groupByRegisteredDay, RECENT_CARD_LIMIT } from '../utils/recentCards'
 import { useCardSearch } from '../hooks/useCardSearch'
 import { useSiteStatus } from '../hooks/useSiteStatus'
-import { sortCards, type SortKey, type SortDir } from '../utils/sortCards'
+import { sortCards, sortByCardNumber, type SortKey, type SortDir } from '../utils/sortCards'
 import { CardGrid } from '../components/CardGrid'
 import { RecentDayGrid } from '../components/RecentDayGrid'
 import { SlotGrid, orderSlotCards } from '../components/SlotGrid'
@@ -93,10 +93,10 @@ export function DisplayPage() {
 
   const filteredByPanel = applyCardFilters(cards, filters)
   const searched = useCardSearch(filteredByPanel, searchQuery)
-  // 枠番号順は昇順固定（昇降順ボタンは無効）。降順の状態が残っていても、枠番号順では昇順で並べる
+  // カード番号順は昇順固定（昇降順ボタンは無効）。降順の状態が残っていても、カード番号順では昇順で並べる
   const slotSort = sortKey === 'slot'
   const effectiveSortDir: SortDir = slotSort ? 'asc' : sortDir
-  // 新着カードは、枠番号順のとき、パックごとの枠番号ではなくカード番号順（パック→新規→再録→パラレル）で日ごとに並べる
+  // 新着カードは、カード番号順のとき、通し番号（overall）を使った、パック→新規→再録→パラレルの順で、日ごとに並べる
   const effectiveSortKey: SortKey = isRecent && sortKey === 'slot' ? 'overall' : sortKey
   const sorted = sortCards(searched, effectiveSortKey, effectiveSortDir)
   const groupedByType = groupCardsByType(sorted)
@@ -104,8 +104,8 @@ export function DisplayPage() {
   const setNameByCode = new Map(sets.map((s) => [s.set_code, setLabel(s)] as const))
 
   // 空き枠は区分ごとのスロット番号（slot）で1〜設定枚数まで表示する（通し番号は使わない）
-  // 検索中や、枠番号順以外の並び替えをしているときは「空いている枠」の概念がそのままでは意味を持たないため、
-  // 検索なし・枠番号順のときだけ空き枠を表示する
+  // 検索中や、カード番号順以外の並び替えをしているときは「空いている枠」の概念がそのままでは意味を持たないため、
+  // 検索なし・カード番号順のときだけ空き枠を表示する（空き枠を出すのは新規だけ。再録・パラレルは、決まった並びで、登録済みのカードだけを並べる）
   const showEmptySlots = !searchQuery.trim() && !hasActiveFilters(filters) && sortKey === 'slot' && !!setInfo
   const slotTypeConfig = setInfo
     ? [
@@ -116,19 +116,21 @@ export function DisplayPage() {
     : []
 
   // 詳細モーダルの前へ/次へで辿る順序。一覧に表示されている並び（区分ごとのまとまり・並べ替え後の順）そのままにする
-  const bySlot = (a: Card, b: Card) => Number(a.slot) - Number(b.slot)
+  // 新規はスロット番号順。再録・パラレルは、カード番号順の決まった並び（種類・色・進化レベルなど）にする
+  const orderForType = (type: Card['type'], list: Card[]): Card[] =>
+    type === '新規' ? [...list].sort((a, b) => Number(a.slot) - Number(b.slot)) : sortByCardNumber(list)
   const primaryCardsOf = (type: Card['type']) => cards.filter((c) => c.type === type && c.set_code === setCode)
   // 追加パックのカード（パックの順 → スロット番号順）。カードの無いパックは除く
   const extraPacksOf = (type: Card['type']) =>
     extraSets
-      .map((s) => ({ set: s, cards: cards.filter((c) => c.type === type && c.set_code === s.set_code).sort(bySlot) }))
+      .map((s) => ({ set: s, cards: orderForType(type, cards.filter((c) => c.type === type && c.set_code === s.set_code)) }))
       .filter((x) => x.cards.length > 0)
   const navCards: Card[] = isRecent
     ? dayGroups.flatMap((d) => d.cards)
     : showEmptySlots
     ? slotTypeConfig
         .filter((tc) => tc.count > 0 || cards.some((c) => c.type === tc.type))
-        .flatMap((tc) => [...orderSlotCards(primaryCardsOf(tc.type), tc.count), ...extraPacksOf(tc.type).flatMap((x) => x.cards)])
+        .flatMap((tc) => [...(tc.type === '新規' ? orderSlotCards(primaryCardsOf(tc.type), tc.count) : orderForType(tc.type, primaryCardsOf(tc.type))), ...extraPacksOf(tc.type).flatMap((x) => x.cards)])
     : groupedByType.flatMap((g) => g.cards)
 
   const [navIndex, setNavIndex] = useState(-1)
@@ -250,7 +252,7 @@ export function DisplayPage() {
           <PackSelect groups={selectGroups} value={activeKey} onChange={setGroupKey} />
 
           <select className="field" value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
-            <option value="slot">枠番号順</option>
+            <option value="slot">カード番号順</option>
             <option value="rarity">レアリティ順</option>
             <option value="name">カード名順</option>
             <option value="hp">HP順</option>
@@ -259,7 +261,7 @@ export function DisplayPage() {
             className="btn-secondary"
             onClick={() => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')}
             disabled={slotSort}
-            title={slotSort ? '枠番号順では昇降順を切り替えられません' : undefined}
+            title={slotSort ? 'カード番号順では昇降順を切り替えられません' : undefined}
             style={slotSort ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
           >
             {effectiveSortDir === 'asc' ? '昇順 ▲' : '降順 ▼'}
@@ -383,7 +385,7 @@ export function DisplayPage() {
         </div>
 
         {/* 新規・再録・パラレルをそれぞれ別のセクションとして表示する。
-            検索なし・枠番号順のときは、未登録の枠も「空き枠」としてその番号を表示する */}
+            検索なし・カード番号順のときは、新規の未登録の枠を「空き枠」としてその番号を表示する */}
         {isRecent
           ? dayGroups.map((day) => (
               <div key={day.key} style={{ marginBottom: 28 }}>
@@ -459,17 +461,32 @@ export function DisplayPage() {
                         {tc.count > 0 ? ` / ${tc.count}` : ''} ITEMS
                       </span>
                     </h3>
-                    <SlotGrid
-                      cards={primaryCardsOf(tc.type)}
-                      count={tc.count}
-                      onCardClick={handleCardClick}
-                      isFav={(c) => isFav(c, activeGroup)}
-                      onToggleFav={handleToggleFav}
-                      selectionMode={selectionMode}
-                      selectedIds={selectedIds}
-                      onToggleSelect={handleToggleSelect}
-                      tileScale={cardScale}
-                    />
+                    {tc.type === '新規' ? (
+                      // 新規は、スロット番号の枠に並べる（未登録の枠は、空き枠として番号を表示）
+                      <SlotGrid
+                        cards={primaryCardsOf(tc.type)}
+                        count={tc.count}
+                        onCardClick={handleCardClick}
+                        isFav={(c) => isFav(c, activeGroup)}
+                        onToggleFav={handleToggleFav}
+                        selectionMode={selectionMode}
+                        selectedIds={selectedIds}
+                        onToggleSelect={handleToggleSelect}
+                        tileScale={cardScale}
+                      />
+                    ) : (
+                      // 再録・パラレルは、決まった並び（レアリティ・種類・色・進化レベル）で、登録済みのカードを並べる
+                      <CardGrid
+                        cards={orderForType(tc.type, primaryCardsOf(tc.type))}
+                        onCardClick={handleCardClick}
+                        isFav={(c) => isFav(c, activeGroup)}
+                        onToggleFav={handleToggleFav}
+                        selectionMode={selectionMode}
+                        selectedIds={selectedIds}
+                        onToggleSelect={handleToggleSelect}
+                        tileScale={cardScale}
+                      />
+                    )}
 
                     {/* パックセットの追加パック（再販など）のカード。代表パックの枠の後ろに、パックごとに続けて表示する */}
                     {extraPacks.map((x) => (
