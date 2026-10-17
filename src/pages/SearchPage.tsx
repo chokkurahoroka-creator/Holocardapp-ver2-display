@@ -1,43 +1,46 @@
 import { useEffect, useState } from 'react'
 import { useSets } from '../hooks/useSets'
 import { usePackSets } from '../hooks/usePackSets'
-import { groupInfoBySetCode } from '../utils/packGroups'
+import { groupInfoBySetCode, comparePackMeta, type PackGroupInfo, type PackOrder } from '../utils/packGroups'
 import { useAllCards } from '../hooks/useAllCards'
 import { useCardSearch } from '../hooks/useCardSearch'
 import { sortCards, type SortKey, type SortDir } from '../utils/sortCards'
-import { applyCardFilters, hasActiveFilters, activeFilterChips, EMPTY_FILTERS, type CardFilters } from '../utils/cardFilters'
+import { applyCardFilters, hasActiveFilters, EMPTY_FILTERS, type CardFilters } from '../utils/cardFilters'
 import { CardGrid } from '../components/CardGrid'
 import { CardFilterPanel, ActiveFilterChips } from '../components/CardFilterPanel'
 import { CardModal } from '../components/CardModal'
 import { SiteNav } from '../components/SiteNav'
-import { FilterIcon } from '../components/FilterIcon'
 import { useIsMobile } from '../hooks/useGridLayout'
 import { CardSizeControl, CARD_SIZE_DEFAULT } from '../components/CardSizeControl'
-import { ControlsBar, useControlsOpen } from '../components/ControlsBar'
+import { ControlsBar, ControlGroup } from '../components/ControlsBar'
+import { SearchBox } from '../components/SearchBox'
+import { FilterButton } from '../components/FilterButton'
 import type { Card } from '../types/card'
 
 const EMPTY_SELECTION = new Set<number>()
 const CARD_SIZE_STORAGE_KEY = 'horoka-display:cardSize'
 
 // パックセットごと（パックセットに入っていないパックは、そのパックごと）に区切ってまとめる。
-// カードの並び順は維持し、区切りの順番は、含まれるパックの弾コードが小さい順にする
+// カードの並び順は維持し、区切りの順番は、パックの並び順（種類順／発売日順）にする
 function groupCardsByPackGroup(
   cards: Card[],
-  info: Map<string, { key: string; name: string }>
+  info: Map<string, PackGroupInfo>,
+  order: PackOrder
 ): { key: string; name: string; cards: Card[] }[] {
-  const byKey = new Map<string, { key: string; name: string; cards: Card[]; minCode: string }>()
+  const byKey = new Map<string, { key: string; name: string; cards: Card[]; minCode: string; releaseDate: string | null; packType: string | null }>()
   cards.forEach((c) => {
-    const g = info.get(c.set_code) ?? { key: c.set_code, name: c.set_code }
+    const g = info.get(c.set_code) ?? { key: c.set_code, name: c.set_code, releaseDate: null, packType: null }
     const existing = byKey.get(g.key)
     if (existing) {
       existing.cards.push(c)
       if (c.set_code.localeCompare(existing.minCode, undefined, { numeric: true }) < 0) existing.minCode = c.set_code
     } else {
-      byKey.set(g.key, { key: g.key, name: g.name, cards: [c], minCode: c.set_code })
+      byKey.set(g.key, { key: g.key, name: g.name, cards: [c], minCode: c.set_code, releaseDate: g.releaseDate, packType: g.packType })
     }
   })
+  const cmp = comparePackMeta(order)
   return Array.from(byKey.values())
-    .sort((a, b) => a.minCode.localeCompare(b.minCode, undefined, { numeric: true }))
+    .sort((a, b) => cmp({ releaseDate: a.releaseDate, packType: a.packType, code: a.minCode }, { releaseDate: b.releaseDate, packType: b.packType, code: b.minCode }))
     .map(({ key, name, cards: groupCards }) => ({ key, name, cards: groupCards }))
 }
 
@@ -57,7 +60,11 @@ export function SearchPage() {
   const [filterPanelOpen, setFilterPanelOpen] = useState(false)
   // 操作パネル（キーワード検索・フィルター）の開閉。キーワード検索がこのページの主役なので、初回は開いておく。
   // 並び替え・昇降順は、パネルを閉じていても使えるよう開閉タブの横に常時表示する
-  const [controlsOpen, setControlsOpen] = useControlsOpen('search', true)
+  // パックの並び順（種類順／発売日順）。端末ごとに覚えておく
+  const [packOrder, setPackOrder] = useState<PackOrder>(() => (localStorage.getItem(PACK_ORDER_STORAGE_KEY) === 'release' ? 'release' : 'type'))
+  useEffect(() => {
+    localStorage.setItem(PACK_ORDER_STORAGE_KEY, packOrder)
+  }, [packOrder])
   const [navIndex, setNavIndex] = useState(-1)
   const isMobile = useIsMobile()
 
@@ -79,7 +86,7 @@ export function SearchPage() {
   const filteredByPanel = applyCardFilters(cards, filters)
   const searched = useCardSearch(filteredByPanel, searchQuery)
   const sorted = sortCards(searched, sortKey, sortDir)
-  const grouped = groupCardsByPackGroup(sorted, packGroupInfo)
+  const grouped = groupCardsByPackGroup(sorted, packGroupInfo, packOrder)
   // 詳細モーダルの前へ/次へで辿る順序。一覧に表示されている並び（弾ごとのまとまり・並べ替え後の順）そのままにする
   const navCards = mergePacks ? sorted : grouped.flatMap((g) => g.cards)
 
@@ -97,89 +104,57 @@ export function SearchPage() {
     <div style={{ width: isMobile ? '90%' : '80%', margin: '0 auto', padding: 'clamp(10px, 4vw, 20px)' }}>
       <SiteNav />
 
-      {/* 開閉タブ（▼/▲）と、その横に常時表示する並び替え・昇降順 */}
-      <ControlsBar
-        open={controlsOpen}
-        onToggle={() => setControlsOpen((v) => !v)}
-        active={!!searchQuery.trim() || hasActiveFilters(filters)}
-      >
-        <select className="field" value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
-          <option value="overall">カード番号順</option>
-          <option value="name">カード名順</option>
-          <option value="rarity">レアリティ順</option>
-          <option value="hp">HP順</option>
-        </select>
-        <button className="btn-secondary" onClick={() => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')}>
-          {sortDir === 'asc' ? '昇順 ▲' : '降順 ▼'}
-        </button>
-        <button
-          className={mergePacks ? 'btn-primary' : 'btn-secondary'}
-          onClick={() => setMergePacks((v) => !v)}
-          aria-pressed={mergePacks}
-          title={mergePacks ? 'パックごとの区切りをなくして表示中（押すと元に戻す）' : 'パックごとの区切りをなくして、全体をまとめて並び替える'}
-          aria-label="パックごとの区切りをなくす"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-        >
-          <PackMergeIcon />
-          {!isMobile && 'パック区切りなし'}
-        </button>
+      {/* 1行目: 検索バー（このページには開閉するパネルが無いため、メニューのタブは出さない）。2行目: カード（並び替え・昇降順・フィルター）とパック（並び順・区切り）のまとまり */}
+      <ControlsBar search={<SearchBox value={searchQuery} onChange={setSearchQuery} placeholder="カード名・タグ・キーワードで検索（全弾対象）" />}>
+        <ControlGroup kind="card">
+          <select className="field" value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
+            <option value="overall">カード番号順</option>
+            <option value="name">カード名順</option>
+            <option value="rarity">レアリティ順</option>
+            <option value="hp">HP順</option>
+          </select>
+          <button className="btn-secondary" onClick={() => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')}>
+            {sortDir === 'asc' ? '昇順 ▲' : '降順 ▼'}
+          </button>
+          <FilterButton filters={filters} open={filterPanelOpen} onToggle={() => setFilterPanelOpen((v) => !v)} />
+        </ControlGroup>
+
+        <ControlGroup kind="pack">
+          {/* パックの並び順：種類順（パックの種類 → 弾コード）／発売日順（新しい順） */}
+          <select className="field" value={packOrder} onChange={(e) => setPackOrder(e.target.value as PackOrder)} aria-label="パックの並び順">
+            <option value="type">種類順</option>
+            <option value="release">発売日順（新しい順）</option>
+          </select>
+          <button
+            className={mergePacks ? 'btn-primary' : 'btn-secondary'}
+            onClick={() => setMergePacks((v) => !v)}
+            aria-pressed={mergePacks}
+            title={mergePacks ? 'パックごとの区切りをなくして表示中（押すと元に戻す）' : 'パックごとの区切りをなくして、全体をまとめて並び替える'}
+            aria-label="パックごとの区切りをなくす"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            <PackMergeIcon />
+            {!isMobile && 'パック区切りなし'}
+          </button>
+        </ControlGroup>
       </ControlsBar>
 
-      {controlsOpen && (
-        <section className="hud-panel mobileBleed" style={{ padding: 'clamp(10px, 3vw, 16px)', marginBottom: 20 }}>
-          {/* 検索と、フィルターの開閉ボタン */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ position: 'relative', flex: '1 1 auto', minWidth: 0 }}>
-              <input
-                className="field"
-                type="text"
-                placeholder="カード名・タグ・キーワードで検索（全弾対象）"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                style={{ width: '100%', minHeight: 40, paddingRight: 36 }}
-              />
-              {searchQuery && (
-                <button type="button" aria-label="検索語を消す" onClick={() => setSearchQuery('')} style={{ position: 'absolute', right: 2, top: '50%', transform: 'translateY(-50%)', width: 32, height: 32, background: 'transparent', border: 'none', color: 'var(--hud-ink-dim)', fontSize: 18, cursor: 'pointer' }}>
-                  ×
-                </button>
-              )}
-            </div>
-            <button
-              className={filterPanelOpen || hasActiveFilters(filters) ? 'btn-primary' : 'btn-secondary'}
-              onClick={() => setFilterPanelOpen((v) => !v)}
-              title="絞り込みフィルター"
-              aria-label="絞り込みフィルター"
-              aria-expanded={filterPanelOpen}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flex: '0 0 auto', minHeight: 40 }}
-            >
-              <FilterIcon />
-              {!isMobile && 'フィルター'}
-              {hasActiveFilters(filters) && (
-                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 18, height: 18, padding: '0 5px', borderRadius: 999, background: '#04232a', color: 'var(--hud-cyan)', fontSize: 11, fontWeight: 700 }}>
-                  {activeFilterChips(filters).length}
-                </span>
-              )}
-            </button>
-          </div>
-
-          {/* 選択中のフィルター条件。フィルターを開かなくても、ここから外せる */}
-          {hasActiveFilters(filters) && (
-            <div style={{ marginTop: 10 }}>
-              <ActiveFilterChips filters={filters} onChange={setFilters} />
-            </div>
-          )}
-
-          {/* 絞り込みフィルター：スマホは画面下のシート、PCはこの下に開く */}
-          {filterPanelOpen &&
-            (isMobile ? (
-              <CardFilterPanel asSheet cards={cards} filters={filters} onChange={setFilters} sets={sets} resultCount={sorted.length} onClose={() => setFilterPanelOpen(false)} />
-            ) : (
-              <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--hud-line)' }}>
-                <CardFilterPanel cards={cards} filters={filters} onChange={setFilters} sets={sets} resultCount={sorted.length} onClose={() => setFilterPanelOpen(false)} />
-              </div>
-            ))}
-        </section>
+      {/* 選択中のフィルター条件。フィルターを開かなくても、ここから外せる */}
+      {hasActiveFilters(filters) && (
+        <div style={{ marginBottom: 12 }}>
+          <ActiveFilterChips filters={filters} onChange={setFilters} />
+        </div>
       )}
+
+      {/* 絞り込みフィルター：スマホは画面下のシート、PCはバーの下に開く */}
+      {filterPanelOpen &&
+        (isMobile ? (
+          <CardFilterPanel asSheet cards={cards} filters={filters} onChange={setFilters} sets={sets} resultCount={sorted.length} onClose={() => setFilterPanelOpen(false)} />
+        ) : (
+          <section className="hud-panel" style={{ padding: 'clamp(10px, 3vw, 16px)', marginBottom: 20 }}>
+            <CardFilterPanel cards={cards} filters={filters} onChange={setFilters} sets={sets} resultCount={sorted.length} onClose={() => setFilterPanelOpen(false)} />
+          </section>
+        ))}
 
       <div className="hud-mono" style={{ fontSize: 12, color: 'var(--hud-ink-dim)', marginBottom: 12 }}>
         {loading ? 'LOADING...' : `${sorted.length} ITEMS / ${grouped.length} SETS`}
@@ -242,6 +217,7 @@ export function SearchPage() {
 }
 
 const MERGE_PACKS_STORAGE_KEY = 'horoka-display:search:mergePacks'
+const PACK_ORDER_STORAGE_KEY = 'horoka-display:search:packOrder'
 
 // 「パックごとの区切りをなくす」ボタンのアイコン（ひとつにまとまった4枚のカード）
 function PackMergeIcon() {

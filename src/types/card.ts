@@ -44,6 +44,8 @@ export type SetInfo = {
   status: string
   default_flag: boolean
   pack_set_id?: number | null // 所属するパックセット（pack_sets.id）。未所属は null
+  pack_type?: string | null // パックの種類（ブースターパック・スターターデッキなど。管理画面のパック管理で入力）
+  release_date?: string | null // 発売日（YYYY-MM-DD。管理画面のパック管理で入力）
 }
 
 // 複数のパックをひとまとまりにして表示するためのパックセット

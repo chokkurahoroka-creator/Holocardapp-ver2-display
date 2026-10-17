@@ -42,7 +42,8 @@ export function useGridLayout(tileScale: number): GridLayout {
     const columns = Math.min(MOBILE_MAX_COLUMNS, Math.max(1, Math.round(MOBILE_DEFAULT_COLUMNS / tileScale - 0.001)))
     return {
       gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-      gap: columns >= 4 ? 6 : 10,
+      // カードが小さくなる（列が増える）ほど、隣との隙間を狭くする：2列以下=12px、3列=8px、4列=6px、5列=4px、6列=3px、7列以上=2px
+      gap: columns <= 2 ? 12 : columns === 3 ? 8 : columns === 4 ? 6 : columns === 5 ? 4 : columns === 6 ? 3 : 2,
       compact: columns >= 3,
       // 5列以上（既定の4列より小さく表示）になったら、★は小さすぎて押しにくく、画像も隠すので非表示にする
       hideFav: columns >= 5,

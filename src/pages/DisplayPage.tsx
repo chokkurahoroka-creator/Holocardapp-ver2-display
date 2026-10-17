@@ -14,8 +14,7 @@ import { CardGrid } from '../components/CardGrid'
 import { RecentDayGrid } from '../components/RecentDayGrid'
 import { SlotGrid, orderSlotCards } from '../components/SlotGrid'
 import { CardFilterPanel, ActiveFilterChips } from '../components/CardFilterPanel'
-import { FilterIcon } from '../components/FilterIcon'
-import { applyCardFilters, hasActiveFilters, activeFilterChips, EMPTY_FILTERS, type CardFilters } from '../utils/cardFilters'
+import { applyCardFilters, hasActiveFilters, EMPTY_FILTERS, type CardFilters } from '../utils/cardFilters'
 import { CardModal } from '../components/CardModal'
 import { MaintenanceBanner } from '../components/MaintenanceBanner'
 import type { Card } from '../types/card'
@@ -24,7 +23,9 @@ import { downloadCardsAsZip } from '../lib/download'
 import { logEvent, logDownloadEvents } from '../lib/logEvent'
 import { SiteNav } from '../components/SiteNav'
 import { CardSizeControl, CARD_SIZE_DEFAULT } from '../components/CardSizeControl'
-import { ControlsBar, useControlsOpen } from '../components/ControlsBar'
+import { ControlsBar, ControlGroup, useControlsOpen } from '../components/ControlsBar'
+import { SearchBox } from '../components/SearchBox'
+import { FilterButton } from '../components/FilterButton'
 import { PackSelect } from '../components/PackSelect'
 
 const THIS_PAGE_KEY = 'display'
@@ -44,7 +45,8 @@ export function DisplayPage() {
   // 選択中の「パックセット（または単独パック）」。以前の版では弾コードを保存していたため、保存値は弾コードでも受け付ける
   const [groupKey, setGroupKey] = useState<string | null>(() => localStorage.getItem(STORAGE_KEY))
   // パック選択リストは、管理画面で「公開中」に設定されているパックだけを、パックセットごとにまとめて表示する
-  const groups = buildPackGroups(sets, packSets, { onlyPublic: true })
+  // 選択リストの並びは、「新着カード」の下が、発売日の新しい順（発売日が未設定のパックは、最後）
+  const groups = buildPackGroups(sets, packSets, { onlyPublic: true, order: 'release' })
   // 選択リストの先頭は「新着カード」。続けて、公開中のパック（パック番号は出さず、パック名だけ）を並べる
   const selectGroups: PackGroup[] = [{ key: RECENT_GROUP_KEY, name: '新着カード', imageUrl: null, sets: [] }, ...groups]
   // 保存されている選択が無い（初めて開いた）ときや、その弾が非公開になったときは、管理画面で「デフォルト」にしたパックを開く。
@@ -243,78 +245,59 @@ export function DisplayPage() {
       >
         <SiteNav />
 
-        {/* 開閉タブ（▼/▲）と、その横に常時表示する弾選択・並び替え・昇降順 */}
+        {/* 1行目: 開閉タブ（メニュー）と、その右横の検索バー。2行目: パック（弾の選択）とカード（並び替え・昇降順・フィルター）のまとまり */}
         <ControlsBar
           open={controlsOpen}
           onToggle={() => setControlsOpen((v) => !v)}
           active={!!searchQuery.trim() || hasActiveFilters(filters)}
+          search={<SearchBox value={searchQuery} onChange={setSearchQuery} />}
         >
-          <PackSelect groups={selectGroups} value={activeKey} onChange={setGroupKey} />
+          <ControlGroup kind="pack">
+            <PackSelect groups={selectGroups} value={activeKey} onChange={setGroupKey} />
+          </ControlGroup>
 
-          <select className="field" value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
-            <option value="slot">カード番号順</option>
-            <option value="rarity">レアリティ順</option>
-            <option value="name">カード名順</option>
-            <option value="hp">HP順</option>
-          </select>
-          <button
-            className="btn-secondary"
-            onClick={() => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')}
-            disabled={slotSort}
-            title={slotSort ? 'カード番号順では昇降順を切り替えられません' : undefined}
-            style={slotSort ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
-          >
-            {effectiveSortDir === 'asc' ? '昇順 ▲' : '降順 ▼'}
-          </button>
+          <ControlGroup kind="card">
+            <select className="field" value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
+              <option value="slot">カード番号順</option>
+              <option value="rarity">レアリティ順</option>
+              <option value="name">カード名順</option>
+              <option value="hp">HP順</option>
+            </select>
+            <button
+              className="btn-secondary"
+              onClick={() => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')}
+              disabled={slotSort}
+              title={slotSort ? 'カード番号順では昇降順を切り替えられません' : undefined}
+              style={slotSort ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
+            >
+              {effectiveSortDir === 'asc' ? '昇順 ▲' : '降順 ▼'}
+            </button>
+            <FilterButton filters={filters} open={filterPanelOpen} onToggle={() => setFilterPanelOpen((v) => !v)} />
+          </ControlGroup>
         </ControlsBar>
 
-        {/* 操作パネル */}
+        {/* 選択中のフィルター条件。フィルターを開かなくても、ここから外せる */}
+        {hasActiveFilters(filters) && (
+          <div style={{ marginBottom: 12 }}>
+            <ActiveFilterChips filters={filters} onChange={setFilters} />
+          </div>
+        )}
+
+        {/* 絞り込みフィルター：スマホは画面下のシート、PCはバーの下に開く */}
+        {filterPanelOpen &&
+          (isMobile ? (
+            <CardFilterPanel asSheet cards={cards} filters={filters} onChange={setFilters} resultCount={sorted.length} onClose={() => setFilterPanelOpen(false)} />
+          ) : (
+            <section className="hud-panel" style={{ padding: 'clamp(10px, 3vw, 16px)', marginBottom: 20 }}>
+              <CardFilterPanel cards={cards} filters={filters} onChange={setFilters} resultCount={sorted.length} onClose={() => setFilterPanelOpen(false)} />
+            </section>
+          ))}
+
+        {/* 操作パネル（メニューで開閉）：画像のまとめてダウンロードと、お気に入りグループ */}
         {controlsOpen && (
         <section className="hud-panel mobileBleed" style={{ padding: 'clamp(10px, 3vw, 16px)', marginBottom: 20 }}>
-          {/* 検索と、フィルターの開閉ボタン */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ position: 'relative', flex: '1 1 auto', minWidth: 0 }}>
-              <input
-                className="field"
-                type="text"
-                placeholder="カード名・タグ・キーワードで検索"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                style={{ width: '100%', minHeight: 40, paddingRight: 36 }}
-              />
-              {searchQuery && (
-                <button type="button" aria-label="検索語を消す" onClick={() => setSearchQuery('')} style={{ position: 'absolute', right: 2, top: '50%', transform: 'translateY(-50%)', width: 32, height: 32, background: 'transparent', border: 'none', color: 'var(--hud-ink-dim)', fontSize: 18, cursor: 'pointer' }}>
-                  ×
-                </button>
-              )}
-            </div>
-            <button
-              className={filterPanelOpen || hasActiveFilters(filters) ? 'btn-primary' : 'btn-secondary'}
-              onClick={() => setFilterPanelOpen((v) => !v)}
-              title="絞り込みフィルター"
-              aria-label="絞り込みフィルター"
-              aria-expanded={filterPanelOpen}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flex: '0 0 auto', minHeight: 40 }}
-            >
-              <FilterIcon />
-              {!isMobile && 'フィルター'}
-              {hasActiveFilters(filters) && (
-                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 18, height: 18, padding: '0 5px', borderRadius: 999, background: '#04232a', color: 'var(--hud-cyan)', fontSize: 11, fontWeight: 700 }}>
-                  {activeFilterChips(filters).length}
-                </span>
-              )}
-            </button>
-          </div>
-
-          {/* 選択中のフィルター条件。フィルターを開かなくても、ここから外せる */}
-          {hasActiveFilters(filters) && (
-            <div style={{ marginTop: 10 }}>
-              <ActiveFilterChips filters={filters} onChange={setFilters} />
-            </div>
-          )}
-
           {/* 画像のまとめてダウンロード */}
-          <div style={{ marginTop: 10 }}>
+          <div>
             <button
               className={selectionMode ? 'btn-primary' : 'btn-secondary'}
               onClick={() => (selectionMode ? handleExitSelectionMode() : setSelectionMode(true))}
@@ -365,16 +348,6 @@ export function DisplayPage() {
               </button>
             )}
           </div>
-
-          {/* 絞り込みフィルター：スマホは画面下のシート、PCはこの下に開く */}
-          {filterPanelOpen &&
-            (isMobile ? (
-              <CardFilterPanel asSheet cards={cards} filters={filters} onChange={setFilters} resultCount={sorted.length} onClose={() => setFilterPanelOpen(false)} />
-            ) : (
-              <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--hud-line)' }}>
-                <CardFilterPanel cards={cards} filters={filters} onChange={setFilters} resultCount={sorted.length} onClose={() => setFilterPanelOpen(false)} />
-              </div>
-            ))}
         </section>
         )}
 
