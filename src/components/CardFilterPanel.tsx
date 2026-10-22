@@ -10,6 +10,7 @@ import {
   distinctBatonTouch,
   distinctCardTypes,
   distinctSkillTypes,
+  distinctSpecialAttackColors,
   distinctStages,
   hasActiveFilters,
   hpBounds,
@@ -26,7 +27,7 @@ type Props = {
   sets?: { set_code: string; set_name: string; display_name?: string | null }[] // 指定した場合のみ「パック」の絞り込みも表示する
   onClose?: () => void
   resultCount?: number // 今の条件で表示されるカード枚数（「◯件を表示」ボタンと見出しに出す）
-  asSheet?: boolean // true のとき、画面下から出てくるシート（スマホ向け）として表示する
+  asSheet?: boolean // true のとき、画面下から出てくるシート（スマホ向け）。false のときは、画面の中央に開くモーダル（PC向け）。どちらも、画面の上に重ねて表示する
 }
 
 // 区分の選択肢（カードの type と同じ値）
@@ -63,8 +64,11 @@ const PANEL_CSS = `
 .fp-pill:hover { border-color: var(--hud-cyan); }
 .fp-pill.on { border-color: var(--hud-cyan); background: rgba(76,224,230,0.18); color: var(--hud-cyan); font-weight: 700; }
 .fp-dot { width: 10px; height: 10px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.35); flex: 0 0 auto; }
-.fp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px 28px; }
+.fp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
 .fp-wide { grid-column: 1 / -1; }
+/* 項目ごとの区切り：薄くて細い線で囲む */
+.fp-box { border: 1px solid rgba(76,224,230,0.2); border-radius: 8px; padding: 10px 12px 12px; background: rgba(76,224,230,0.025); min-width: 0; }
+.fp-stack { display: flex; flex-direction: column; gap: 8px; }
 .fp-sec-title { font-size: 11px; letter-spacing: .04em; color: var(--hud-ink-dim); }
 .fp-badge {
   display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px;
@@ -154,7 +158,8 @@ export function ActiveFilterChips({ filters, onChange }: { filters: CardFilters;
 // 部品
 // ---------------------------------------------------------------------------
 
-// 1項目分のまとまり。スマホ（シート）では開閉式にして、選択中の数をバッジで示す
+// 1項目分のまとまり。項目どうしの区切りが分かるよう、薄くて細い線で囲む。
+// スマホ（シート）では開閉式にして、選択中の数をバッジで示す
 function Section({
   label,
   count = 0,
@@ -181,7 +186,7 @@ function Section({
   )
 
   return (
-    <div className={wide ? 'fp-wide' : undefined} style={collapsible ? { borderBottom: '1px solid var(--hud-line)', paddingBottom: expanded ? 12 : 0 } : undefined}>
+    <div className={`fp-box${wide ? ' fp-wide' : ''}`}>
       {collapsible ? (
         <button
           type="button"
@@ -192,13 +197,14 @@ function Section({
             alignItems: 'center',
             gap: 8,
             width: '100%',
-            minHeight: 46,
+            minHeight: 36,
             background: 'transparent',
             border: 'none',
             color: 'var(--hud-ink)',
             cursor: 'pointer',
             padding: 0,
             textAlign: 'left',
+            marginBottom: expanded ? 8 : 0,
           }}
         >
           {title}
@@ -399,6 +405,7 @@ export function CardFilterPanel({ cards, filters, onChange, sets, onClose, resul
   const skillTypes = distinctSkillTypes(cards)
   const batonTouchValues = distinctBatonTouch(cards).map(String)
   const attributes = distinctAttributes(cards)
+  const specialAttackColors = distinctSpecialAttackColors(cards)
   const cardTypes = distinctCardTypes(cards)
   const stages = distinctStages(cards)
   const { min: hpMinBound, max: hpMaxBound } = hpBounds(cards)
@@ -411,7 +418,6 @@ export function CardFilterPanel({ cards, filters, onChange, sets, onClose, resul
 
   // シート表示のあいだは、後ろのページがスクロールしないようにし、Escで閉じられるようにする
   useEffect(() => {
-    if (!asSheet) return
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     const onKey = (e: KeyboardEvent) => {
@@ -422,12 +428,12 @@ export function CardFilterPanel({ cards, filters, onChange, sets, onClose, resul
       document.body.style.overflow = prev
       window.removeEventListener('keydown', onKey)
     }
-  }, [asSheet, onClose])
+  }, [onClose])
 
   const countText = resultCount === undefined ? '' : `${resultCount}件`
 
   const sections = (
-    <div className={asSheet ? undefined : 'fp-grid'}>
+    <div className={asSheet ? 'fp-stack' : 'fp-grid'}>
       <Section label="区分" count={filters.types.length} collapsible={asSheet} defaultOpen>
         <PillGroup options={CARD_KIND_OPTIONS} selected={filters.types} onToggle={(v) => onChange({ ...filters, types: toggle(filters.types, v) })} />
       </Section>
@@ -435,6 +441,12 @@ export function CardFilterPanel({ cards, filters, onChange, sets, onClose, resul
       {attributes.length > 0 && (
         <Section label="カード色" count={filters.attributes.length} collapsible={asSheet} defaultOpen>
           <PillGroup withDot options={attributes} selected={filters.attributes} onToggle={(v) => onChange({ ...filters, attributes: toggle(filters.attributes, v) })} />
+        </Section>
+      )}
+
+      {specialAttackColors.length > 0 && (
+        <Section label="特攻色" count={filters.specialAttackColors.length} collapsible={asSheet}>
+          <PillGroup withDot options={specialAttackColors} selected={filters.specialAttackColors} onToggle={(v) => onChange({ ...filters, specialAttackColors: toggle(filters.specialAttackColors, v) })} />
         </Section>
       )}
 
@@ -532,121 +544,102 @@ export function CardFilterPanel({ cards, filters, onChange, sets, onClose, resul
       </div>
     ) : null
 
-  // ---- スマホ：画面下から出るシート ----
-  if (asSheet) {
-    return createPortal(
+  // ---- 画面に重ねて表示：スマホは画面下から出るシート、PCは画面の中央に開くモーダル ----
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="絞り込み"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 1100,
+        display: 'flex',
+        alignItems: asSheet ? 'flex-end' : 'center',
+        justifyContent: 'center',
+        padding: asSheet ? 0 : 24,
+        animation: 'fp-fade .15s ease-out',
+      }}
+    >
+      <style>{PANEL_CSS}</style>
+      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.6)' }} />
       <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="絞り込み"
-        style={{ position: 'fixed', inset: 0, zIndex: 1100, display: 'flex', alignItems: 'flex-end', animation: 'fp-fade .15s ease-out' }}
+        style={{
+          position: 'relative',
+          width: asSheet ? '100%' : 'min(980px, 100%)',
+          maxHeight: asSheet ? '90dvh' : '88dvh',
+          display: 'flex',
+          flexDirection: 'column',
+          background: 'var(--hud-bg, #061217)',
+          border: asSheet ? undefined : '1px solid var(--hud-cyan)',
+          borderTop: '1px solid var(--hud-cyan)',
+          borderRadius: asSheet ? '16px 16px 0 0' : 12,
+          boxShadow: asSheet ? undefined : '0 16px 48px rgba(0,0,0,0.6)',
+          animation: asSheet ? 'fp-sheet-up .2s ease-out' : 'fp-fade .15s ease-out',
+          color: 'var(--hud-ink)',
+        }}
       >
-        <style>{PANEL_CSS}</style>
-        <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.6)' }} />
-        <div
-          style={{
-            position: 'relative',
-            width: '100%',
-            maxHeight: '90dvh',
-            display: 'flex',
-            flexDirection: 'column',
-            background: 'var(--hud-bg, #061217)',
-            borderTop: '1px solid var(--hud-cyan)',
-            borderRadius: '16px 16px 0 0',
-            animation: 'fp-sheet-up .2s ease-out',
-            color: 'var(--hud-ink)',
-          }}
-        >
-          {/* 見出し：件数と閉じるボタンは常に見える */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px 8px' }}>
-            <span className="hud-font" style={{ fontSize: 16, fontWeight: 700 }}>
-              絞り込み
+        {/* 見出し：件数・リセット・閉じるボタンは、常に見える */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: asSheet ? '12px 16px 8px' : '14px 20px 10px', flexWrap: 'wrap' }}>
+          <span className="hud-font" style={{ fontSize: 16, fontWeight: 700 }}>
+            {asSheet ? '絞り込み' : 'FILTER'}
+          </span>
+          {countText && (
+            <span className="hud-mono" style={{ fontSize: 12, color: 'var(--hud-cyan)' }}>
+              {asSheet ? countText : `${countText}が該当`}
             </span>
-            {countText && (
-              <span className="hud-mono" style={{ fontSize: 12, color: 'var(--hud-cyan)' }}>
-                {countText}
-              </span>
+          )}
+          {!asSheet && <span style={{ fontSize: 11, color: 'var(--hud-ink-dim)' }}>選ばなかった項目は、すべて表示します</span>}
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+            {!asSheet && (
+              <button type="button" className="btn-secondary" onClick={reset} disabled={!hasFilter} style={{ opacity: hasFilter ? 1 : 0.4 }}>
+                リセット
+              </button>
             )}
             <button
               type="button"
               onClick={onClose}
               aria-label="閉じる"
-              style={{ marginLeft: 'auto', width: 40, height: 40, background: 'transparent', border: 'none', color: 'var(--hud-ink)', fontSize: 22, cursor: 'pointer' }}
+              style={{ width: 40, height: 40, background: 'transparent', border: 'none', color: 'var(--hud-ink)', fontSize: 22, cursor: 'pointer' }}
             >
               ×
             </button>
           </div>
+        </div>
 
-          {hasFilter && (
-            <div style={{ padding: '0 16px 8px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <ActiveFilterChips filters={filters} onChange={onChange} />
-              {logicSwitch}
-            </div>
-          )}
-
-          <div style={{ flex: 1, overflowY: 'auto', overscrollBehavior: 'contain', padding: '0 16px 12px' }}>
-            <div style={{ fontSize: 11, color: 'var(--hud-ink-dim)', padding: '2px 0 4px' }}>選ばなかった項目は、すべて表示します</div>
-            {sections}
+        {hasFilter && (
+          <div style={{ padding: asSheet ? '0 16px 8px' : '0 20px 10px', display: 'flex', flexDirection: asSheet ? 'column' : 'row', flexWrap: 'wrap', alignItems: asSheet ? 'stretch' : 'center', gap: asSheet ? 8 : 12 }}>
+            <ActiveFilterChips filters={filters} onChange={onChange} />
+            {logicSwitch}
           </div>
+        )}
 
-          {/* 下部固定：リセットと、結果を見るボタン */}
-          <div
-            style={{
-              display: 'flex',
-              gap: 10,
-              padding: '10px 16px',
-              paddingBottom: 'calc(10px + env(safe-area-inset-bottom, 0px))',
-              borderTop: '1px solid var(--hud-line)',
-            }}
-          >
+        <div style={{ flex: 1, overflowY: 'auto', overscrollBehavior: 'contain', padding: asSheet ? '0 16px 12px' : '0 20px 16px' }}>
+          {asSheet && <div style={{ fontSize: 11, color: 'var(--hud-ink-dim)', padding: '2px 0 6px' }}>選ばなかった項目は、すべて表示します</div>}
+          {sections}
+        </div>
+
+        {/* 下部固定：リセット（スマホ）と、結果を見るボタン */}
+        <div
+          style={{
+            display: 'flex',
+            gap: 10,
+            padding: asSheet ? '10px 16px' : '12px 20px',
+            paddingBottom: asSheet ? 'calc(10px + env(safe-area-inset-bottom, 0px))' : 12,
+            borderTop: '1px solid var(--hud-line)',
+          }}
+        >
+          {asSheet && (
             <button type="button" className="btn-secondary" onClick={reset} disabled={!hasFilter} style={{ minHeight: 44, opacity: hasFilter ? 1 : 0.4 }}>
               リセット
             </button>
-            <button type="button" className="btn-primary" onClick={onClose} style={{ flex: 1, minHeight: 44, fontWeight: 700 }}>
-              {resultCount === undefined ? '閉じる' : `${resultCount}件を表示`}
-            </button>
-          </div>
-        </div>
-      </div>,
-      document.body,
-    )
-  }
-
-  // ---- PC：ページ内に開くパネル ----
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <style>{PANEL_CSS}</style>
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <span className="hud-mono" style={{ fontSize: 12, color: 'var(--hud-cyan)' }}>
-          FILTER://
-        </span>
-        {countText && (
-          <span className="hud-mono" style={{ fontSize: 12, color: 'var(--hud-ink)' }}>
-            {countText}が該当
-          </span>
-        )}
-        <span style={{ fontSize: 11, color: 'var(--hud-ink-dim)' }}>選ばなかった項目は、すべて表示します</span>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <button type="button" className="btn-secondary" onClick={reset} disabled={!hasFilter} style={{ opacity: hasFilter ? 1 : 0.4 }}>
-            リセット
-          </button>
-          {onClose && (
-            <button type="button" className="btn-secondary" onClick={onClose}>
-              閉じる
-            </button>
           )}
+          <button type="button" className="btn-primary" onClick={onClose} style={{ flex: 1, minHeight: 44, fontWeight: 700 }}>
+            {resultCount === undefined ? '閉じる' : `${resultCount}件を表示`}
+          </button>
         </div>
       </div>
-
-      {hasFilter && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
-          <ActiveFilterChips filters={filters} onChange={onChange} />
-          {logicSwitch}
-        </div>
-      )}
-
-      {sections}
-    </div>
+    </div>,
+    document.body,
   )
 }

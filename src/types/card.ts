@@ -30,6 +30,7 @@ export type Card = {
   lean?: boolean
   // 軽量データにだけ含まれる、フィルター・キーワード検索用の派生データ
   skill_types?: string[] // 固有スキルの種類（ギフト・コラボエフェクト等）
+  special_attack_colors?: string[] // アーツの特攻対象色（重複なし）。軽量データには、cards_tokkou ビューから取得して付ける
   search_text?: string // 固有スキル・アーツの名前と効果文をまとめた検索用テキスト
 }
 

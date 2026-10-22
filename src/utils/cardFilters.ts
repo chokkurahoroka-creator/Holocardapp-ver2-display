@@ -16,6 +16,7 @@ export type CardFilters = {
   tags: string[]
   batonTouches: string[]
   attributes: string[]
+  specialAttackColors: string[] // 特攻対象色（アーツの特攻の色）
   cardTypes: string[]
   stages: string[]
   setCodes: string[] // 「全カード検索」ページでのみ使用（カード一覧側は常に空）
@@ -30,6 +31,7 @@ export const EMPTY_FILTERS: CardFilters = {
   tags: [],
   batonTouches: [],
   attributes: [],
+  specialAttackColors: [],
   cardTypes: [],
   stages: [],
   setCodes: [],
@@ -99,6 +101,16 @@ const BASE_COLORS = ['白', '緑', '赤', '青', '紫', '黄']
 // フィルターに並べるカード色の順番
 const ATTRIBUTE_ORDER = [...BASE_COLORS, '多色', '無色', 'その他']
 
+// ---- 特攻色 ----
+// アーツの「特攻対象色」。軽量データでは special_attack_colors に入っている（cards_tokkou ビューから取得）。
+// 全項目のデータ（arts_json を持つ）のときは、アーツから拾う
+type ArtRow = { specialAttackColor?: string }
+
+export function cardSpecialAttackColors(card: Card): string[] {
+  if (card.special_attack_colors) return card.special_attack_colors
+  return Array.from(new Set(((card.arts_json ?? []) as ArtRow[]).map((a) => (a?.specialAttackColor ?? '').trim()).filter(Boolean)))
+}
+
 // 複数色の属性から、含まれる色を取り出す。「多色[赤青]」のほか、過去に入れた「白/緑」「白・緑」の形も読み取る
 function multiColorParts(attribute: string): string[] {
   const m = attribute.match(/^多色\[(.*)\]$/)
@@ -125,6 +137,17 @@ function attributeMatches(attribute: string | null | undefined, v: string): bool
   if (v === '多色') return attributeBucket(a) === '多色'
   if (BASE_COLORS.includes(v)) return a === v || multiColorParts(a).includes(v)
   return attributeBucket(a) === v
+}
+
+// 特攻色の選択肢。カード色と同じ並び（白・緑・赤・青・紫・黄・無色）で、その他の値は最後に並べる
+export function distinctSpecialAttackColors(cards: Card[]): string[] {
+  const present = new Set<string>()
+  cards.forEach((c) => cardSpecialAttackColors(c).forEach((v) => present.add(v)))
+  const rank = (v: string) => {
+    const i = ATTRIBUTE_ORDER.indexOf(v)
+    return i === -1 ? ATTRIBUTE_ORDER.length : i
+  }
+  return Array.from(present).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b, 'ja'))
 }
 
 export function distinctAttributes(cards: Card[]): string[] {
@@ -200,6 +223,7 @@ function activeChecks(c: Card, filters: CardFilters): boolean[] {
   filters.tags.forEach((v) => checks.push(splitTags(c.tags).includes(v)))
   filters.batonTouches.forEach((v) => checks.push(String(batonTouchValue(c)) === v))
   filters.attributes.forEach((v) => checks.push(attributeMatches(c.attribute, v)))
+  filters.specialAttackColors.forEach((v) => checks.push(cardSpecialAttackColors(c).includes(v)))
   filters.cardTypes.forEach((v) => checks.push(c.card_type === v))
   filters.stages.forEach((v) => checks.push(c.stage === v))
   filters.setCodes.forEach((v) => checks.push(c.set_code === v))
@@ -225,6 +249,7 @@ export function hasActiveFilters(filters: CardFilters): boolean {
     filters.tags.length > 0 ||
     filters.batonTouches.length > 0 ||
     filters.attributes.length > 0 ||
+    filters.specialAttackColors.length > 0 ||
     filters.cardTypes.length > 0 ||
     filters.stages.length > 0 ||
     filters.setCodes.length > 0
@@ -239,6 +264,7 @@ export function activeFilterChips(filters: CardFilters): { category: keyof CardF
   filters.tags.forEach((v) => chips.push({ category: 'tags', value: v, label: `タグ: ${v}` }))
   filters.batonTouches.forEach((v) => chips.push({ category: 'batonTouches', value: v, label: `バトンタッチ: ${v}` }))
   filters.attributes.forEach((v) => chips.push({ category: 'attributes', value: v, label: `カード色: ${v}` }))
+  filters.specialAttackColors.forEach((v) => chips.push({ category: 'specialAttackColors', value: v, label: `特攻色: ${v}` }))
   filters.cardTypes.forEach((v) => chips.push({ category: 'cardTypes', value: v, label: `カード種類: ${v}` }))
   filters.stages.forEach((v) => chips.push({ category: 'stages', value: v, label: `進化レベル: ${v}` }))
   filters.setCodes.forEach((v) => chips.push({ category: 'setCodes', value: v, label: `弾: ${v}` }))

@@ -146,15 +146,8 @@ export function SearchPage() {
         </div>
       )}
 
-      {/* 絞り込みフィルター：スマホは画面下のシート、PCはバーの下に開く */}
-      {filterPanelOpen &&
-        (isMobile ? (
-          <CardFilterPanel asSheet cards={cards} filters={filters} onChange={setFilters} sets={sets} resultCount={sorted.length} onClose={() => setFilterPanelOpen(false)} />
-        ) : (
-          <section className="hud-panel" style={{ padding: 'clamp(10px, 3vw, 16px)', marginBottom: 20 }}>
-            <CardFilterPanel cards={cards} filters={filters} onChange={setFilters} sets={sets} resultCount={sorted.length} onClose={() => setFilterPanelOpen(false)} />
-          </section>
-        ))}
+      {/* 絞り込みフィルター：スマホは画面下のシート、PCは画面中央のモーダル */}
+        {filterPanelOpen && <CardFilterPanel asSheet={isMobile} cards={cards} filters={filters} onChange={setFilters} sets={sets} resultCount={sorted.length} onClose={() => setFilterPanelOpen(false)} />}
 
       <div className="hud-mono" style={{ fontSize: 12, color: 'var(--hud-ink-dim)', marginBottom: 12 }}>
         {loading ? 'LOADING...' : `${sorted.length} ITEMS / ${grouped.length} SETS`}

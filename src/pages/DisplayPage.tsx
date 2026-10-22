@@ -283,15 +283,8 @@ export function DisplayPage() {
           </div>
         )}
 
-        {/* 絞り込みフィルター：スマホは画面下のシート、PCはバーの下に開く */}
-        {filterPanelOpen &&
-          (isMobile ? (
-            <CardFilterPanel asSheet cards={cards} filters={filters} onChange={setFilters} resultCount={sorted.length} onClose={() => setFilterPanelOpen(false)} />
-          ) : (
-            <section className="hud-panel" style={{ padding: 'clamp(10px, 3vw, 16px)', marginBottom: 20 }}>
-              <CardFilterPanel cards={cards} filters={filters} onChange={setFilters} resultCount={sorted.length} onClose={() => setFilterPanelOpen(false)} />
-            </section>
-          ))}
+        {/* 絞り込みフィルター：スマホは画面下のシート、PCは画面中央のモーダル */}
+        {filterPanelOpen && <CardFilterPanel asSheet={isMobile} cards={cards} filters={filters} onChange={setFilters} resultCount={sorted.length} onClose={() => setFilterPanelOpen(false)} />}
 
         {/* 操作パネル（メニューで開閉）：画像のまとめてダウンロードと、お気に入りグループ */}
         {controlsOpen && (

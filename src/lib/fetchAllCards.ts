@@ -18,6 +18,7 @@ import type { Card } from '../types/card'
 // ---------------------------------------------------------------------------
 
 const LIST_VIEW = 'cards_list'
+const TOKKOU_VIEW = 'cards_tokkou' // 特攻対象色を持つカードだけの、軽いビュー（id と special_attack_colors）
 const PAGE_SIZE = 1000 // Supabase(PostgREST)は1回で最大1000行まで
 const CACHE_KEY = 'all-cards'
 const CACHE_SCHEMA = 2 // 保存形式を変えたときに上げると、古い保存データは使われない
@@ -84,15 +85,40 @@ async function fetchLeanOrFull(mod?: QueryMod): Promise<Card[]> {
   }
 }
 
+// 特攻色（アーツの特攻対象色）を、軽量データのカードに付ける。ビューが無い（SQL未実行）ときは、何もしない（フィルターに特攻色が出ないだけ）。
+// 特攻色を持つカードだけの小さなデータなので、取得は、ページを開いてから1回だけ（結果を使い回す）
+let tokkouPromise: Promise<Map<number, string[]> | null> | null = null
+
+function loadTokkouMap(): Promise<Map<number, string[]> | null> {
+  if (!tokkouPromise) {
+    tokkouPromise = fetchPaged(TOKKOU_VIEW)
+      .then((rows) => new Map<number, string[]>(rows.map((r) => [r.id as number, (r.special_attack_colors as string[] | null) ?? []])))
+      .catch((err) => {
+        console.warn('cards_tokkou ビューを使えないため、特攻色の絞り込みは出ません', err)
+        return null
+      })
+  }
+  return tokkouPromise
+}
+
+async function attachTokkou(cards: Card[]): Promise<Card[]> {
+  const map = await loadTokkouMap()
+  if (!map) return cards
+  cards.forEach((c) => {
+    if (c.lean) c.special_attack_colors = map.get(c.id) ?? []
+  })
+  return cards
+}
+
 // 弾ごとの取得（新カード一覧・カードプール用）
 export async function fetchAllCards(setCode?: string): Promise<Card[]> {
-  return fetchLeanOrFull(setCode ? (q) => q.eq('set_code', setCode) : undefined)
+  return attachTokkou(await fetchLeanOrFull(setCode ? (q) => q.eq('set_code', setCode) : undefined))
 }
 
 // 複数のパックのカードをまとめて取得（パックセットの表示用）
 export async function fetchCardsBySets(setCodes: string[]): Promise<Card[]> {
   if (setCodes.length === 0) return []
-  return fetchLeanOrFull((q) => q.in('set_code', setCodes))
+  return attachTokkou(await fetchLeanOrFull((q) => q.in('set_code', setCodes)))
 }
 
 // 最新の更新日時と総枚数（1行だけの軽いリクエスト）
@@ -124,11 +150,11 @@ export async function loadAllCards(opts?: { onCached?: (cards: Card[]) => void }
   } catch (err) {
     // 更新日時を確認できない（SQL未実行・通信エラー等）。保存データがあればそれを使い、無ければ保存なしで取得する
     console.warn('更新確認に失敗したため、保存せずに取得します', err)
-    return cached ? cached.cards : fetchLeanOrFull()
+    return cached ? attachTokkou(cached.cards) : attachTokkou(await fetchLeanOrFull())
   }
 
   // 前回から変わっていない → ダウンロード不要
-  if (cached && cached.latest === head.latest && cached.cards.length === head.count) return cached.cards
+  if (cached && cached.latest === head.latest && cached.cards.length === head.count) return attachTokkou(cached.cards)
 
   let cards: Card[] | null = null
   if (cached) {
@@ -146,6 +172,7 @@ export async function loadAllCards(opts?: { onCached?: (cards: Card[]) => void }
   if (!cards) cards = (await fetchPaged(LIST_VIEW)).map(toLeanCard)
 
   cards.sort((a, b) => a.id - b.id)
+  await attachTokkou(cards)
   void cacheSet(CACHE_KEY, { schema: CACHE_SCHEMA, latest: head.latest, cards } satisfies CachedCards)
   return cards
 }
