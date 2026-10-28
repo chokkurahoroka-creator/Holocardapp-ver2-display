@@ -1,5 +1,8 @@
 import type { Card } from '../types/card'
 import { getRarityConfig, renderRarityFrame } from '../utils/rarityFrame'
+import { isNewCard, NEW_CARD_DAYS } from '../utils/recentCards'
+
+const NEW_RED = '#ff3b3b'
 
 type Props = {
   card: Card
@@ -15,14 +18,44 @@ type Props = {
 
 export function CardTile({ card, onClick, isFav, onToggleFav, selectionMode, selected, onToggleSelect, compact = false, hideFav = false }: Props) {
   const badgeColor = getRarityConfig(card.rarity).badgeColor
+  const isNew = isNewCard(card) // 登録から5日以内のカードは、赤枠と「NEW!」で目立たせる
 
   return (
     <div
       className={`hud-tile group${selected ? ' selected' : ''}`}
       onClick={() => (selectionMode ? onToggleSelect(card) : onClick(card))}
       // 下部の情報を隠すcompact表示のときは、タイル自体の余白も0にして画像を枠一杯に表示する
-      style={{ width: '100%', ...(compact ? { padding: 0 } : null) }}
+      style={{
+        width: '100%',
+        ...(compact ? { padding: 0 } : null),
+        // 選択中は、これまでどおりの水色の枠を優先する
+        ...(isNew && !selected ? { border: `2px solid ${NEW_RED}`, boxShadow: `0 0 10px rgba(255,59,59,0.65)` } : null),
+      }}
     >
+      {isNew && (
+        <span
+          title={`登録から${NEW_CARD_DAYS}日以内のカード`}
+          className="hud-mono"
+          style={{
+            position: 'absolute',
+            top: compact ? 3 : 8,
+            right: compact ? 3 : 8,
+            zIndex: 2,
+            padding: compact ? '0 4px' : '1px 7px',
+            borderRadius: 4,
+            background: NEW_RED,
+            color: '#fff',
+            fontSize: compact ? 9 : 12,
+            fontWeight: 800,
+            lineHeight: compact ? '14px' : '18px',
+            letterSpacing: '0.04em',
+            boxShadow: '0 1px 4px rgba(0,0,0,0.5)',
+            pointerEvents: 'none',
+          }}
+        >
+          NEW!
+        </span>
+      )}
       {selectionMode ? (
         <div
           style={{

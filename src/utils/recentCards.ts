@@ -21,6 +21,14 @@ export function parseRegisteredAt(value: unknown): number | null {
   return Number.isNaN(t) ? null : t
 }
 
+// 「NEW!」の表示：新しく登録されてから、この日数以内のカード（更新日ではなく、登録日時 cards.timestamp が基準）
+export const NEW_CARD_DAYS = 5
+
+export function isNewCard(card: Card, now: number = Date.now()): boolean {
+  const t = parseRegisteredAt(card.timestamp)
+  return t !== null && now - t <= NEW_CARD_DAYS * 24 * 60 * 60 * 1000
+}
+
 const dayFormatter = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' })
 
 // 登録日（日本時間）を「2026-10-12」の形で返す。登録日が分からないカードは 'unknown'
