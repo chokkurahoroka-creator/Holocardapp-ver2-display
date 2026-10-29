@@ -50,21 +50,25 @@ function PackGlyph() {
 // 操作のまとまりを、枠で囲む。枠線の上に「CARD」「PACK」の小さな見出しとマークを載せて、
 // カードの並び替え（水色）なのか、パックの並び替え・選択（黄色）なのかが、ひと目で分かるようにする
 export function ControlGroup({ kind, children }: { kind: 'card' | 'pack'; children: ReactNode }) {
+  const isMobile = useIsMobile()
   const color = kind === 'card' ? 'var(--hud-cyan)' : '#ffd76a'
   const label = kind === 'card' ? 'CARD' : 'PACK'
   return (
     <div
       title={kind === 'card' ? 'カードの並び替え・絞り込み' : 'パックの選択・並び替え'}
+      // スマホ：枠を小さくして、2つの枠（PACK・CARD）を、画面の横幅に合わせて1行に並べる（CARDは、ボタンが多いので、少し広く）
+      className={isMobile ? 'ctl-compact' : undefined}
       style={{
         position: 'relative',
         display: 'flex',
-        flexWrap: 'wrap',
+        flexWrap: isMobile ? 'nowrap' : 'wrap',
         alignItems: 'center',
-        gap: 6,
-        padding: '12px 8px 7px',
+        gap: isMobile ? 4 : 6,
+        padding: isMobile ? '11px 5px 5px' : '12px 8px 7px',
         border: `1px solid ${color}`,
         borderRadius: 6,
         minWidth: 0,
+        ...(isMobile ? { flex: kind === 'card' ? '1.7 1 0' : '1 1 0' } : null),
       }}
     >
       <span
@@ -149,7 +153,9 @@ export function ControlsBar({ open = false, onToggle, active = false, search, ch
         {search}
       </div>
 
-      {children && <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: isMobile ? 10 : 14, paddingTop: 4 }}>{children}</div>}
+      {children && (
+        <div style={{ display: 'flex', flexWrap: isMobile ? 'nowrap' : 'wrap', alignItems: isMobile ? 'stretch' : 'flex-start', gap: isMobile ? 6 : 14, paddingTop: 4 }}>{children}</div>
+      )}
     </div>
   )
 }

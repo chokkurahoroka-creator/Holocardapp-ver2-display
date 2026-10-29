@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { RECENT_GROUP_KEY, type PackGroup } from '../utils/packGroups'
+import { useIsMobile } from '../hooks/useGridLayout'
 
 type Props = {
   groups: PackGroup[] // 選択肢にするグループ（先頭は「新着カード」。続いて、パックセット、またはパックセットに入っていない単独パック）
@@ -63,6 +64,7 @@ function GroupIcon({ g, size }: { g: PackGroup; size: number }) {
 // 弾の選択（パック名の前にアイコン画像を表示する）。
 // <select>の<option>には画像を入れられないため、ボタン＋一覧の自前ドロップダウンにしている
 export function PackSelect({ groups, value, onChange }: Props) {
+  const isMobile = useIsMobile()
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const selected = groups.find((g) => g.key === value) ?? null
@@ -106,7 +108,7 @@ export function PackSelect({ groups, value, onChange }: Props) {
   })
 
   return (
-    <div ref={rootRef} style={{ position: 'relative', width: 'clamp(120px, 38vw, 260px)', maxWidth: '100%' }}>
+    <div ref={rootRef} className="pack-select-root" style={{ position: 'relative', width: 'clamp(120px, 38vw, 260px)', maxWidth: '100%' }}>
       <button
         type="button"
         className="field hud-mono"
@@ -115,7 +117,7 @@ export function PackSelect({ groups, value, onChange }: Props) {
         aria-expanded={open}
         style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', cursor: 'pointer' }}
       >
-        {selected && <GroupIcon g={selected} size={22} />}
+        {selected && <GroupIcon g={selected} size={isMobile ? 18 : 22} />}
         <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {selected ? selected.name : '読み込み中…'}
         </span>

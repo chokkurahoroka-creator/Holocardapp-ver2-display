@@ -216,3 +216,28 @@ select.field option {
 .group:hover .hud-sweep {
   animation: hud-shine-sweep-hover 1s ease-in-out infinite;
 }
+/* ===== スマホ：パック選択・並び順の枠を小さくして、横幅に合わせて1行に並べる ===== */
+.ctl-compact .field {
+  padding: 4px 6px;
+  font-size: 12px;
+  min-height: 32px;
+}
+.ctl-compact select.field {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+.ctl-compact .btn-primary,
+.ctl-compact .btn-secondary {
+  padding: 3px 7px;
+  font-size: 12px;
+  gap: 4px;
+  min-height: 32px !important;
+  flex: 0 0 auto;
+}
+.ctl-compact .pack-select-root {
+  flex: 1 1 0;
+  width: auto !important;
+  min-width: 0;
+}

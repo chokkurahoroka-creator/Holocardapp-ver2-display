@@ -12,12 +12,16 @@ import {
   distinctSkillTypes,
   distinctSpecialAttackColors,
   distinctStages,
+  activeGroupCount,
+  effectiveGroupLogic,
   hasActiveFilters,
   hpBounds,
   removeFilterChip,
   tagCounts,
   EMPTY_FILTERS,
   type CardFilters,
+  type FilterLogic,
+  type GroupKey,
 } from '../utils/cardFilters'
 
 type Props = {
@@ -143,7 +147,7 @@ export function ActiveFilterChips({ filters, onChange }: { filters: CardFilters;
         {chips.length >= 2 && (
           <button
             type="button"
-            onClick={() => onChange({ ...EMPTY_FILTERS, logic: filters.logic })}
+            onClick={() => onChange({ ...EMPTY_FILTERS, logic: filters.logic, groupLogic: filters.groupLogic })}
             style={{ ...chipStyle, border: '1px solid var(--hud-line)', background: 'transparent', color: 'var(--hud-ink-dim)' }}
           >
             すべて解除
@@ -158,14 +162,52 @@ export function ActiveFilterChips({ filters, onChange }: { filters: CardFilters;
 // 部品
 // ---------------------------------------------------------------------------
 
+// 項目内の、AND/ORの小さな切り替え（選んだ値が2つ以上のときに、見出しの右に出す）
+function GroupLogicToggle({ label, value, onChange }: { label: string; value: FilterLogic; onChange: (l: FilterLogic) => void }) {
+  return (
+    <div
+      role="group"
+      aria-label={`${label}の中の組み合わせ`}
+      title={`${label}の中で、選んだ値を、すべて満たす（AND）か、いずれか満たす（OR）か`}
+      style={{ display: 'inline-flex', marginLeft: 'auto', flexShrink: 0, borderRadius: 999, border: '1px solid var(--hud-line)', overflow: 'hidden' }}
+    >
+      {(['and', 'or'] as const).map((mode) => (
+        <button
+          key={mode}
+          type="button"
+          onClick={() => onChange(mode)}
+          aria-pressed={value === mode}
+          className="hud-mono"
+          style={{
+            padding: '2px 9px',
+            minHeight: 22,
+            fontSize: 11,
+            fontWeight: 800,
+            letterSpacing: '0.04em',
+            border: 'none',
+            cursor: 'pointer',
+            background: value === mode ? 'var(--hud-cyan)' : 'transparent',
+            color: value === mode ? '#04232a' : 'var(--hud-ink-dim)',
+            touchAction: 'manipulation',
+          }}
+        >
+          {mode === 'and' ? 'AND' : 'OR'}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 // 1項目分のまとまり。項目どうしの区切りが分かるよう、薄くて細い線で囲む。
-// スマホ（シート）では開閉式にして、選択中の数をバッジで示す
+// スマホ（シート）では開閉式にして、選択中の数をバッジで示す。
+// logic を渡すと、選んだ値が2つ以上のとき、見出しの右に、項目内のAND/ORの切り替えが出る
 function Section({
   label,
   count = 0,
   collapsible,
   defaultOpen = false,
   wide = false,
+  logic,
   children,
 }: {
   label: string
@@ -173,6 +215,7 @@ function Section({
   collapsible: boolean
   defaultOpen?: boolean
   wide?: boolean
+  logic?: { value: FilterLogic; onChange: (l: FilterLogic) => void }
   children: ReactNode
 }) {
   const [open, setOpen] = useState(defaultOpen || count > 0)
@@ -184,34 +227,41 @@ function Section({
       {count > 0 && <span className="fp-badge">{count}</span>}
     </>
   )
+  const toggle = logic && count >= 2 ? <GroupLogicToggle label={label} value={logic.value} onChange={logic.onChange} /> : null
 
   return (
     <div className={`fp-box${wide ? ' fp-wide' : ''}`}>
       {collapsible ? (
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={expanded}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            width: '100%',
-            minHeight: 36,
-            background: 'transparent',
-            border: 'none',
-            color: 'var(--hud-ink)',
-            cursor: 'pointer',
-            padding: 0,
-            textAlign: 'left',
-            marginBottom: expanded ? 8 : 0,
-          }}
-        >
-          {title}
-          <span style={{ marginLeft: 'auto', color: 'var(--hud-ink-dim)', fontSize: 12 }}>{expanded ? '▲' : '▼'}</span>
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: expanded ? 8 : 0 }}>
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={expanded}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              flex: 1,
+              minWidth: 0,
+              minHeight: 36,
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--hud-ink)',
+              cursor: 'pointer',
+              padding: 0,
+              textAlign: 'left',
+            }}
+          >
+            {title}
+            <span style={{ marginLeft: 'auto', color: 'var(--hud-ink-dim)', fontSize: 12 }}>{expanded ? '▲' : '▼'}</span>
+          </button>
+          {toggle && expanded && <div style={{ display: 'flex' }}>{toggle}</div>}
+        </div>
       ) : (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>{title}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          {title}
+          {toggle}
+        </div>
       )}
       {expanded && children}
     </div>
@@ -410,11 +460,10 @@ export function CardFilterPanel({ cards, filters, onChange, sets, onClose, resul
   const stages = distinctStages(cards)
   const { min: hpMinBound, max: hpMaxBound } = hpBounds(cards)
 
-  const chips = activeFilterChips(filters)
-  const logicChips = chips.filter((c) => c.category !== 'types').length // 区分はAND/ORの対象外
+  const logicGroups = activeGroupCount(filters) // 条件のある項目の数（区分はAND/ORの対象外）
   const hasFilter = hasActiveFilters(filters)
   const hpSet = !!(filters.hpMin || filters.hpMax)
-  const reset = () => onChange({ ...EMPTY_FILTERS, logic: filters.logic })
+  const reset = () => onChange({ ...EMPTY_FILTERS, logic: filters.logic, groupLogic: filters.groupLogic })
 
   // シート表示のあいだは、後ろのページがスクロールしないようにし、Escで閉じられるようにする
   useEffect(() => {
@@ -432,6 +481,12 @@ export function CardFilterPanel({ cards, filters, onChange, sets, onClose, resul
 
   const countText = resultCount === undefined ? '' : `${resultCount}件`
 
+  // 項目内のAND/ORの切り替え（選んでいない項目は、項目どうしの組み合わせ方と同じ）
+  const groupLogicProps = (key: GroupKey) => ({
+    value: effectiveGroupLogic(filters, key),
+    onChange: (l: FilterLogic) => onChange({ ...filters, groupLogic: { ...filters.groupLogic, [key]: l } }),
+  })
+
   const sections = (
     <div className={asSheet ? 'fp-stack' : 'fp-grid'}>
       <Section label="区分" count={filters.types.length} collapsible={asSheet} defaultOpen>
@@ -439,25 +494,25 @@ export function CardFilterPanel({ cards, filters, onChange, sets, onClose, resul
       </Section>
 
       {attributes.length > 0 && (
-        <Section label="カード色" count={filters.attributes.length} collapsible={asSheet} defaultOpen>
+        <Section label="カード色" count={filters.attributes.length} collapsible={asSheet} logic={groupLogicProps('attributes')} defaultOpen>
           <PillGroup withDot options={attributes} selected={filters.attributes} onToggle={(v) => onChange({ ...filters, attributes: toggle(filters.attributes, v) })} />
         </Section>
       )}
 
       {specialAttackColors.length > 0 && (
-        <Section label="特攻色" count={filters.specialAttackColors.length} collapsible={asSheet}>
+        <Section label="特攻色" count={filters.specialAttackColors.length} collapsible={asSheet} logic={groupLogicProps('specialAttackColors')}>
           <PillGroup withDot options={specialAttackColors} selected={filters.specialAttackColors} onToggle={(v) => onChange({ ...filters, specialAttackColors: toggle(filters.specialAttackColors, v) })} />
         </Section>
       )}
 
       {cardTypes.length > 0 && (
-        <Section label="カード種類" count={filters.cardTypes.length} collapsible={asSheet}>
+        <Section label="カード種類" count={filters.cardTypes.length} collapsible={asSheet} logic={groupLogicProps('cardTypes')}>
           <PillGroup options={cardTypes} selected={filters.cardTypes} onToggle={(v) => onChange({ ...filters, cardTypes: toggle(filters.cardTypes, v) })} />
         </Section>
       )}
 
       {stages.length > 0 && (
-        <Section label="進化レベル" count={filters.stages.length} collapsible={asSheet}>
+        <Section label="進化レベル" count={filters.stages.length} collapsible={asSheet} logic={groupLogicProps('stages')}>
           <PillGroup options={stages} selected={filters.stages} onToggle={(v) => onChange({ ...filters, stages: toggle(filters.stages, v) })} />
         </Section>
       )}
@@ -497,18 +552,18 @@ export function CardFilterPanel({ cards, filters, onChange, sets, onClose, resul
       </Section>
 
       {batonTouchValues.length > 0 && (
-        <Section label="バトンタッチ" count={filters.batonTouches.length} collapsible={asSheet}>
+        <Section label="バトンタッチ" count={filters.batonTouches.length} collapsible={asSheet} logic={groupLogicProps('batonTouches')}>
           <PillGroup options={batonTouchValues} selected={filters.batonTouches} onToggle={(v) => onChange({ ...filters, batonTouches: toggle(filters.batonTouches, v) })} />
         </Section>
       )}
 
       {skillTypes.length > 0 && (
-        <Section label="固有スキル種類" count={filters.skillTypes.length} collapsible={asSheet} wide>
+        <Section label="固有スキル種類" count={filters.skillTypes.length} collapsible={asSheet} logic={groupLogicProps('skillTypes')} wide>
           <PillGroup options={skillTypes} selected={filters.skillTypes} onToggle={(v) => onChange({ ...filters, skillTypes: toggle(filters.skillTypes, v) })} />
         </Section>
       )}
 
-      <Section label="タグ" count={filters.tags.length} collapsible={asSheet} wide>
+      <Section label="タグ" count={filters.tags.length} collapsible={asSheet} logic={groupLogicProps('tags')} wide>
         <TagPicker cards={cards} selected={filters.tags} onChange={(tags) => onChange({ ...filters, tags })} />
       </Section>
     </div>
@@ -516,10 +571,10 @@ export function CardFilterPanel({ cards, filters, onChange, sets, onClose, resul
 
   // 条件が2つ以上あるときだけ意味を持つ、AND/ORの切り替え
   const logicSwitch =
-    logicChips >= 2 ? (
+    logicGroups >= 2 ? (
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
         <span className="hud-mono" style={{ fontSize: 10, color: 'var(--hud-ink-dim)' }}>
-          条件の組み合わせ
+          項目どうしの組み合わせ
         </span>
         <div style={{ display: 'inline-flex', borderRadius: 999, border: '1px solid var(--hud-line)', overflow: 'hidden' }}>
           {(['and', 'or'] as const).map((mode) => (

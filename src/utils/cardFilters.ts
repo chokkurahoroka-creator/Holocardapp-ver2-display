@@ -1,12 +1,21 @@
 import type { Card } from '../types/card'
 
-// logicは「選択したすべての条件（チップ1つ1つ）」の組み合わせ方。
-// AND = 選んだ条件をすべて満たすカードだけ表示。OR = 選んだ条件のどれか1つでも満たせば表示。
-// （カテゴリ内だから自動的にOR、というグループ化はせず、文字通り選択した個々の値単位でAND/ORを切り替える）
+// AND/ORの組み合わせ方は、2段階：
+//  ・項目内（groupLogic）：1つの項目（カード色・タグなど）の中で、選んだ値をどう組み合わせるか。
+//      AND = 選んだ値をすべて満たす。OR = 選んだ値のどれか1つでも満たす。
+//      項目ごとに選べる。選んでいない項目は、下の logic（項目どうし）と同じ組み合わせ方になる。
+//  ・項目どうし（logic）：条件のある項目どうしを、どう組み合わせるか。
+//      AND = すべての項目を満たすカードだけ表示。OR = どれかの項目を満たせば表示。
+// （項目内を選んでいないときは、これまでと同じ動き：logic が、選んだ個々の値すべてに効く）
 export type FilterLogic = 'and' | 'or'
 
+// 項目内のAND/ORを選べる項目
+export type GroupKey = 'skillTypes' | 'tags' | 'batonTouches' | 'attributes' | 'specialAttackColors' | 'cardTypes' | 'stages' | 'setCodes'
+export type GroupLogic = Partial<Record<GroupKey, FilterLogic>>
+
 export type CardFilters = {
-  logic: FilterLogic
+  logic: FilterLogic // 項目どうしの組み合わせ方（項目内を選んでいない項目の、既定の組み合わせ方にもなる）
+  groupLogic: GroupLogic // 項目内の組み合わせ方（項目ごと。選んでいない項目は logic と同じ）
   // 区分（新規・再録・パラレル）。未選択ならすべて表示。選んだ区分のどれかに当てはまるカードだけを表示する。
   // 他の条件のAND/ORには含めず、常に「他の条件に加えて」絞り込む
   types: string[]
@@ -24,6 +33,7 @@ export type CardFilters = {
 
 export const EMPTY_FILTERS: CardFilters = {
   logic: 'and',
+  groupLogic: {},
   types: [],
   skillTypes: [],
   hpMin: '',
@@ -216,28 +226,47 @@ function hpInRange(c: Card, filters: CardFilters): boolean {
   return true
 }
 
-// 選択された条件を、個々の値ごとに1つずつの判定関数として並べる（AND/ORはこの配列単位で適用する）
-function activeChecks(c: Card, filters: CardFilters): boolean[] {
-  const checks: boolean[] = []
-  filters.skillTypes.forEach((v) => checks.push(cardSkillTypes(c).includes(v)))
-  filters.tags.forEach((v) => checks.push(splitTags(c.tags).includes(v)))
-  filters.batonTouches.forEach((v) => checks.push(String(batonTouchValue(c)) === v))
-  filters.attributes.forEach((v) => checks.push(attributeMatches(c.attribute, v)))
-  filters.specialAttackColors.forEach((v) => checks.push(cardSpecialAttackColors(c).includes(v)))
-  filters.cardTypes.forEach((v) => checks.push(c.card_type === v))
-  filters.stages.forEach((v) => checks.push(c.stage === v))
-  filters.setCodes.forEach((v) => checks.push(c.set_code === v))
-  if (filters.hpMin || filters.hpMax) checks.push(hpInRange(c, filters))
-  return checks
+// 項目（カード色・タグなど）ごとの、現在の項目内の組み合わせ方。選んでいない項目は、項目どうしの組み合わせ方（logic）と同じ
+export function effectiveGroupLogic(filters: CardFilters, key: GroupKey): FilterLogic {
+  return filters.groupLogic[key] ?? filters.logic
 }
+
+// 選択された条件を、項目ごとにまとめて、値ごとの判定を並べる（項目内のAND/ORは、この配列単位で適用する）
+type CheckGroup = { logic: FilterLogic; checks: boolean[] }
+
+function checkGroups(c: Card, filters: CardFilters): CheckGroup[] {
+  const groups: CheckGroup[] = []
+  const add = (key: GroupKey, values: string[], test: (v: string) => boolean) => {
+    if (values.length > 0) groups.push({ logic: effectiveGroupLogic(filters, key), checks: values.map(test) })
+  }
+  add('skillTypes', filters.skillTypes, (v) => cardSkillTypes(c).includes(v))
+  add('tags', filters.tags, (v) => splitTags(c.tags).includes(v))
+  add('batonTouches', filters.batonTouches, (v) => String(batonTouchValue(c)) === v)
+  add('attributes', filters.attributes, (v) => attributeMatches(c.attribute, v))
+  add('specialAttackColors', filters.specialAttackColors, (v) => cardSpecialAttackColors(c).includes(v))
+  add('cardTypes', filters.cardTypes, (v) => c.card_type === v)
+  add('stages', filters.stages, (v) => c.stage === v)
+  add('setCodes', filters.setCodes, (v) => c.set_code === v)
+  // HPの範囲は、1つの条件（項目内の組み合わせは、関係ない）
+  if (filters.hpMin || filters.hpMax) groups.push({ logic: filters.logic, checks: [hpInRange(c, filters)] })
+  return groups
+}
+
+const groupPasses = (g: CheckGroup): boolean => (g.logic === 'or' ? g.checks.some(Boolean) : g.checks.every(Boolean))
 
 export function applyCardFilters(cards: Card[], filters: CardFilters): Card[] {
   return cards.filter((c) => {
     if (filters.types.length > 0 && !filters.types.includes(c.type)) return false
-    const checks = activeChecks(c, filters)
-    if (checks.length === 0) return true
-    return filters.logic === 'or' ? checks.some(Boolean) : checks.every(Boolean)
+    const groups = checkGroups(c, filters)
+    if (groups.length === 0) return true
+    return filters.logic === 'or' ? groups.some(groupPasses) : groups.every(groupPasses)
   })
+}
+
+// 条件のある項目の数（HPの範囲も1項目。区分は、AND/ORの対象外）。2つ以上あるときに、項目どうしのAND/ORが意味を持つ
+export function activeGroupCount(filters: CardFilters): number {
+  const lists: string[][] = [filters.skillTypes, filters.tags, filters.batonTouches, filters.attributes, filters.specialAttackColors, filters.cardTypes, filters.stages, filters.setCodes]
+  return lists.filter((l) => l.length > 0).length + (filters.hpMin || filters.hpMax ? 1 : 0)
 }
 
 export function hasActiveFilters(filters: CardFilters): boolean {
