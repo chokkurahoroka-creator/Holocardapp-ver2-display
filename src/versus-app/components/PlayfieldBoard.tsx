@@ -6,11 +6,15 @@ import type { GhostSpec } from '../hooks/useTouchDrag'
 import { backStyleOf } from '../utils/cardBack'
 import { setScaledDragImage } from '../utils/dragImage'
 import { ATTRIBUTE_COLORS, COLORLESS, parseAttribute } from '../utils/attribute'
-import { HALF_GAP, HALF_H, HALF_W, LOG_FRAME_H, LOG_LABEL_H, LOG_PAD, LOG_W, LOG_X, MAT_H, SIDE_PANEL_W, SIDE_PANEL_X, ZONES, skillCost, handRowLayout, ZONE_BY_KEY, findCard, slotBlocked, parseZone, archiveSplit, isDamageableZone, unitDamage, unitHpUp, unitPower, unitParts, zoneId, type PlayCard, type PlayState, type Side, type TurnState, type ZoneDef, type ZoneId, type ZoneKey } from '../utils/playfield'
+import { HALF_GAP, HALF_H, HALF_W, LOG_FRAME_H, LOG_LABEL_H, LOG_PAD, LOG_W, LOG_X, MAT_H, SIDE_PANEL_W, SIDE_PANEL_X, ZONES, skillCost, handRowLayout, ZONE_BY_KEY, findCard, slotBlocked, parseZone, archiveSplit, isDamageableZone, unitDamage, unitHpUp, unitPower, unitParts, zoneId, PHASE_LABEL, type PlayCard, type PlayState, type Side, type TurnState, type ZoneDef, type ZoneId, type ZoneKey } from '../utils/playfield'
 
 // ドラッグ中のもの。card: 1枚のカード／unit: 枠の中身全体（ブルーム・サポート・エールごと）／search: 検索結果（新しいカード）／damage: ダメージカウンター
 export type PlayDrag = { kind: 'card'; uid: string } | { kind: 'unit'; zone: ZoneId } | { kind: 'search'; card: DeckCard } | { kind: 'damage'; amount: number; from?: ZoneId } | { kind: 'power'; amount: number; from?: ZoneId } | { kind: 'hp'; amount: number; from?: ZoneId } | null
 export type DragItem = NonNullable<PlayDrag>
+
+// 「どの枠をクリック（タップ）するか」を選ばせるモード（エールをつけるホロメンを選ぶ・アーツを使うセンターを選ぶ・ダメージを与える相手を選ぶ）。
+// zones の枠が光って、クリックすると onPickZone が呼ばれる
+export type PickState = { zones: ZoneId[]; color: string }
 
 // アニメーション。shuffle: そのゾーンのカードをシャッフルする動き／down: ダメージで倒されたホロメンが、アーカイブへ飛んでいく動き
 export type PlayFxInput = { kind: 'shuffle'; zone: ZoneId } | { kind: 'down' | 'fly'; from: ZoneId; to: ZoneId; card: DeckCard } // fly：カードが、1枚、別のゾーンへ飛んでいく（ホロパワーのアーカイブなど）
@@ -108,6 +112,8 @@ export type BoardProps = {
   onHandReturnAll: (side: Side) => void // 手札の左：手札を、全てデッキに戻す
   onHandSort: (side: Side) => void // 手札の左：手札を、並び替える
   concealSide?: Side // 対戦中：この側の、手札などの中身は、伏せて見せない（相手の側）
+  pick: PickState | null // 枠を選ばせているとき
+  onPickZone: (zone: ZoneId) => void // 光っている枠を、クリック（タップ）したとき
 }
 
 // ---- カードの裏面 ----
@@ -432,6 +438,8 @@ function ZoneView({ def, side, p }: { def: ZoneDef; side: Side; p: BoardProps })
   const showSkills = oshiSkills.length > 0
   const allowed = dropAllowed(p.drag, id, p.state)
   const over = allowed && p.overZone === id
+  const picking = !!p.pick && p.pick.zones.includes(id) // 選んでもらう枠（光らせて、クリックで選べる）
+  const pickColor = p.pick?.color ?? '#ffd76a'
   const isDeck = def.key === 'deck'
   const top = cards[cards.length - 1]
   const w = def.w
@@ -476,6 +484,7 @@ function ZoneView({ def, side, p }: { def: ZoneDef; side: Side; p: BoardProps })
             selected={unitSelected}
             draggable
             fit={{ w: w - 6, h: h - 6 }}
+            onClickOverride={picking ? () => p.onPickZone(id) : undefined}
             p={p}
             dragItem={{ kind: 'unit', zone: id }} // 中身ごと動かす（ブルーム・サポート・エールも連動）
             style={{ position: 'absolute', left: 0, top: 0 }}
@@ -734,7 +743,8 @@ function ZoneView({ def, side, p }: { def: ZoneDef; side: Side; p: BoardProps })
           p.onDropZone(id, undefined, pos)
         }}
         onClick={() => {
-          if (p.moveMode) p.onZoneTap(id) // 移動先として、このゾーンを選んだ
+          if (picking) p.onPickZone(id) // ステップの中で、この枠を選んだ
+          else if (p.moveMode) p.onZoneTap(id) // 移動先として、このゾーンを選んだ
           else if (def.kind === 'pile' || def.kind === 'life') openZone()
           else p.onSelect(null)
         }}
@@ -754,11 +764,11 @@ function ZoneView({ def, side, p }: { def: ZoneDef; side: Side; p: BoardProps })
           border: `3px solid ${def.color}`,
           background: `${def.color}2e`,
           borderRadius: 12,
-          boxShadow: over ? '0 0 0 6px var(--hud-cyan), 0 0 24px var(--hud-cyan)' : 'none',
+          boxShadow: over ? '0 0 0 6px var(--hud-cyan), 0 0 24px var(--hud-cyan)' : picking ? `0 0 0 4px ${pickColor}, 0 0 34px ${pickColor}` : 'none',
           // 移動先を選んでいるあいだは、全部のゾーンを、黄色い点線で示す
-          outline: p.moveMode ? '5px dashed #ffd76a' : 'none',
+          outline: p.moveMode ? '5px dashed #ffd76a' : picking ? `6px solid ${pickColor}` : 'none',
           outlineOffset: 2,
-          cursor: p.moveMode || def.kind === 'pile' || def.kind === 'life' ? 'pointer' : 'default',
+          cursor: p.moveMode || picking || def.kind === 'pile' || def.kind === 'life' ? 'pointer' : 'default',
         }}
       >
         {/* ゾーンの名前（カードが無いときは大きく、あるときは左上に小さく） */}
@@ -1118,12 +1128,18 @@ function LogFrame({ p }: { p: BoardProps }) {
   )
 }
 
-// ターン表示：先攻・後攻、ターン数、ターンチェンジのボタン。ログの枠の両側（自分は右、相手は左で、反対向き）。幅は、ライフの枠と同じ
+// ターン表示：先攻・後攻、ターン数、いまのステップ、ステップを進めるボタン。ログの枠の両側（自分は右、相手は左で、反対向き）。幅は、ライフの枠と同じ
+// ボタンは、ステップに合わせて変わる：メインステップ → 「メインステップ終了」／パフォーマンスステップ → 「パフォーマンスステップ終了」（押すと、ターンチェンジ）。
+// ドロー・エールのステップは、画面の案内に沿って進める（ボタンは、押せない）
 function TurnPanel({ side, p }: { side: Side; p: BoardProps }) {
   const active = p.turn.active === side
   const turnNo = side === 'me' ? p.turn.me : p.turn.opp
   const isFirst = p.turn.first === side
-  const locked = p.concealSide === side // 対戦中、相手の側のターンチェンジは、押せない
+  const locked = p.concealSide === side // 対戦中、相手の側のボタンは、押せない（相手が、自分の画面で押す）
+  const phase = p.turn.phase
+  const canPress = active && !locked && (phase === 'main' || phase === 'performance')
+  const lines: [string, string] = !active ? ['待機中', ''] : phase === 'draw' ? ['ドロー', 'ステップ中'] : phase === 'yell' ? ['エール', 'ステップ中'] : phase === 'main' ? ['メインステップ', '終了'] : ['パフォーマンス', 'ステップ終了']
+  const title = locked ? '相手のボタンは、押せません（相手が、自分の画面で押します）' : !active ? '相手のターンです' : phase === 'draw' ? 'ドローステップ：デッキをクリックして、1枚引きます' : phase === 'yell' ? 'エールステップ：エールをつけるホロメンを選びます' : phase === 'main' ? 'メインステップを終えて、パフォーマンスステップに進みます' : 'パフォーマンスステップを終えて、ターンチェンジします（SUPPORT のカードをアーカイブへ送り、相手のターン数を+1して、相手のステージの警告マークを消します）'
   return (
     <div
       onClick={(e) => e.stopPropagation()}
@@ -1147,45 +1163,45 @@ function TurnPanel({ side, p }: { side: Side; p: BoardProps }) {
         zIndex: 8,
       }}
     >
-      <button type="button" onClick={() => p.onToggleFirst()} title="クリックで、先攻・後攻を入れ替える（先攻が1ターン目、後攻が0ターン目になります）" style={{ background: 'transparent', border: 'none', color: isFirst ? '#ffd76a' : '#9fc3ca', fontWeight: 800, fontSize: 28, lineHeight: 1, cursor: 'pointer', padding: 0 }}>
-        {isFirst ? '先攻' : '後攻'}
-      </button>
+      <div style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+        <button type="button" onClick={() => p.onToggleFirst()} title="クリックで、先攻・後攻を入れ替える（先攻が1ターン目、後攻が0ターン目になります）" style={{ background: 'transparent', border: 'none', color: isFirst ? '#ffd76a' : '#9fc3ca', fontWeight: 800, fontSize: 28, lineHeight: 1, cursor: 'pointer', padding: 0 }}>
+          {isFirst ? '先攻' : '後攻'}
+        </button>
+        {active && <span style={{ fontWeight: 800, fontSize: 16, color: '#4ce0e6', whiteSpace: 'nowrap' }}>{PHASE_LABEL[phase]}</span>}
+      </div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, lineHeight: 1 }}>
         <span style={{ fontWeight: 800, fontSize: 44 }}>{turnNo}</span>
         <span style={{ fontSize: 18, color: '#9fc3ca' }}>ターン目</span>
       </div>
       <button
         type="button"
-        disabled={locked}
+        disabled={!canPress}
         onClick={() => p.onTurnChange(side)}
-        title={locked ? '相手のターンチェンジは、押せません（相手が、自分の画面で押します）' : 'ターンチェンジ：SUPPORT のカードをアーカイブへ送り、相手のターン数を+1して、相手のステージの警告マークを消します'}
+        title={title}
         style={{
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: 2,
-          width: 104,
-          height: 104,
+          gap: 4,
+          width: '100%',
+          height: 96,
           flex: '0 0 auto',
-          borderRadius: '50%',
-          border: `4px solid ${active ? '#4ce0e6' : '#6b7280'}`,
-          background: active ? 'radial-gradient(circle at 35% 30%, rgba(76,224,230,0.55), rgba(76,224,230,0.16))' : 'rgba(255,255,255,0.07)',
-          color: active ? '#d9fdff' : '#cbd5e1',
+          borderRadius: 22,
+          border: `4px solid ${canPress ? '#4ce0e6' : '#6b7280'}`,
+          background: canPress ? 'radial-gradient(circle at 35% 30%, rgba(76,224,230,0.55), rgba(76,224,230,0.16))' : 'rgba(255,255,255,0.07)',
+          color: canPress ? '#d9fdff' : '#cbd5e1',
           fontWeight: 800,
-          fontSize: 23,
+          fontSize: lines[0].length > 6 ? 21 : 24,
           lineHeight: 1.1,
-          cursor: locked ? 'not-allowed' : 'pointer',
-          opacity: locked ? 0.45 : 1,
+          cursor: canPress ? 'pointer' : 'not-allowed',
+          opacity: canPress ? 1 : 0.5,
           padding: 0,
-          boxShadow: active ? '0 0 16px rgba(76,224,230,0.45)' : undefined,
+          boxShadow: canPress ? '0 0 16px rgba(76,224,230,0.45)' : undefined,
         }}
       >
-        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M20 12a8 8 0 0 0-13.7-5.6L4 8.7M4 4v4.7h4.7M4 12a8 8 0 0 0 13.7 5.6L20 15.3M20 20v-4.7h-4.7" />
-        </svg>
-        <span>Turn</span>
-        <span>Change</span>
+        <span>{lines[0]}</span>
+        {lines[1] && <span>{lines[1]}</span>}
       </button>
     </div>
   )
@@ -1228,6 +1244,6 @@ function PlayfieldBoardImpl(props: BoardProps) {
 
 // 盤面に関係するデータが変わったときだけ、描き直す（メッセージ・検索・プレビューなど、盤面と関係ない変更では、描き直さない）。
 // コールバック（on〜）は、比べない。呼ぶ側（PlayfieldPanel）が、常に最新の処理を呼ぶ、変わらない関数を渡す
-const BOARD_DATA_KEYS = ['state', 'selectedUid', 'drag', 'overZone', 'overPos', 'hpOf', 'touchMode', 'moveMode', 'maxHeight', 'fx', 'oshiSkills', 'skillUsed', 'turn', 'concealSide'] as const satisfies readonly (keyof BoardProps)[]
+const BOARD_DATA_KEYS = ['state', 'selectedUid', 'drag', 'overZone', 'overPos', 'hpOf', 'touchMode', 'moveMode', 'maxHeight', 'fx', 'oshiSkills', 'skillUsed', 'turn', 'concealSide', 'pick'] as const satisfies readonly (keyof BoardProps)[]
 const sameBoardData = (a: BoardProps, b: BoardProps): boolean => BOARD_DATA_KEYS.every((k) => a[k] === b[k])
 export const PlayfieldBoard = memo(PlayfieldBoardImpl, sameBoardData)

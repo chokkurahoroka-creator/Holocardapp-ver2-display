@@ -25,6 +25,8 @@ import {
   archiveSplit,
   attachYellFromDeck,
   compactBacks,
+  attackTargetZones,
+  calcArtDamage,
   endTurn,
   initialTurn,
   normalizeTurn,
@@ -66,12 +68,14 @@ import {
   zoneLabel,
   type PlayCard,
   type PlayState,
+  type TurnPhase,
   type TurnState,
   type Side,
+  yellTargetZones,
   type ZoneId,
   type ZoneKey,
 } from '../utils/playfield'
-import { DAMAGE_STRIP, PlayfieldBoard, type BoardProps, type OshiSkill, dropAllowed, type DragItem, type DropPos, type PlayDrag, type PlayFx, type PlayFxInput } from './PlayfieldBoard'
+import { DAMAGE_STRIP, PlayfieldBoard, type BoardProps, type OshiSkill, dropAllowed, type DragItem, type DropPos, type PickState, type PlayDrag, type PlayFx, type PlayFxInput } from './PlayfieldBoard'
 import { CardPreview } from './CardPreview'
 import { CardEffects } from './CardEffects'
 import { DeckMenu, type DeckMenuAction } from './DeckMenu'
@@ -79,6 +83,10 @@ import { DamageCounterStrip } from './DamageCounterStrip'
 import { PlayLogPanel } from './PlayLogPanel'
 import { VictoryModal } from './VictoryModal'
 import { TurnChangeBanner } from './TurnChangeBanner'
+import { DrawStepOverlay } from './DrawStepOverlay'
+import { ArtPickModal } from './ArtPickModal'
+import { parseAttribute } from '../utils/attribute'
+import type { ArtRow } from '../types/artsSkills'
 import { winnerByLife } from '../utils/victory'
 import { PLAY_LOG_LIMIT, diffPlayLog, diffSkillLog, diffTurnLog, type PlayLogDraft, type PlayLogEntry } from '../utils/playLog'
 
@@ -530,7 +538,9 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
   }
 
   // base：カウンターを別のカードから移すとき、外したあとの盤面から計算する
-  const damageUnit = (zone: ZoneId, delta: number, base: PlayState = state) => {
+  // note：アーツのダメージの内訳など、メッセージの頭に付ける文（省くと、付けない）
+  const damageUnit = (zone: ZoneId, delta: number, base: PlayState = state, note = '') => {
+    const pre = note ? `${note}\n` : ''
     if (!isDamageableZone(base, zone)) {
       setMessage('ダメージを与えられるのは、センター・コラボ・バックステージのホロメンです')
       return
@@ -545,13 +555,13 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
     if (r.defeated) {
       const side = parseZone(zone)?.side ?? 'me'
       pushFx({ kind: 'down', from: zone, to: zoneId(side, 'archive'), card: r.defeated.card })
-      setMessage(`${name}のHPが0になったため、アーカイブへ送りました`)
+      setMessage(`${pre}${name}のHPが0になったため、アーカイブへ送りました`)
       if (selectedUnit?.zone === zone) handleSelect(null)
       return
     }
     const top = unitParts(r.state[zone]).top
     const baseHp = top ? hpOf(top.card) : null
-    setMessage(baseHp === null ? `${name}に${delta}ダメージ（HPが分からないため、HPが0になっても、自動ではアーカイブへ送られません）` : `${name}に${delta}ダメージ（残りHP ${Math.max(0, baseHp + unitHpUp(r.state[zone]) - unitDamage(r.state[zone]))}）`)
+    setMessage(pre + (baseHp === null ? `${name}に${delta}ダメージ（HPが分からないため、HPが0になっても、自動ではアーカイブへ送られません）` : `${name}に${delta}ダメージ（残りHP ${Math.max(0, baseHp + unitHpUp(r.state[zone]) - unitDamage(r.state[zone]))}）`))
   }
 
   // パワーアップカウンターを乗せる／外す
@@ -825,16 +835,153 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
     }
   }, [fullscreen])
 
-  // ターンチェンジ：SUPPORT（旧ログ）のカードをアーカイブへ／相手のターン数を+1／相手のステージの警告マークを消す／盤面の背景（ターンを進める側が紺色）を入れ替える
+  // ===== ターンのステップ：ドロー → エール → メイン → パフォーマンス（そのあと、ターンチェンジ） =====
+  // ・ドロー：デッキを画面の中央に出して、クリックで1枚引く
+  // ・エール：エールデッキの上の1枚を、ステージのどのホロメンにつけるかを、クリック（タップ）で選ぶ
+  // ・メイン：これまでどおり、自由に操作する。「メインステップ終了」で、パフォーマンスへ
+  // ・パフォーマンス：センターのホロメンをクリック → アーツを選ぶ → 相手のコラボ・センター・バックを選ぶと、ダメージを与える。「パフォーマンスステップ終了」で、ターンチェンジ
+  // ひとりで使うときは、ターンを進めている側（turn.active）の、どちらの側でも操作できる。対戦中は、自分のターンのときだけ
+  const stepSide: Side = turn.active
+  const stepOther: Side = stepSide === 'me' ? 'opp' : 'me'
+  const canAct = !versus || turn.active === 'me'
+  const [attackArt, setAttackArt] = useState<ArtRow | null>(null) // 使うアーツを選んだあと、ダメージを与える相手を選んでいる最中
+  const [artModalOpen, setArtModalOpen] = useState(false)
+  const attackerZone = zoneId(stepSide, 'center')
+  const attackerHolomen = unitParts(state[attackerZone]).holomen
+  const attackerTop = isDamageableZone(state, attackerZone) ? attackerHolomen[attackerHolomen.length - 1] : undefined
+  const performing = canAct && turn.phase === 'performance'
+  const attackerDetail = useCardDetailForPreview(performing && attackerTop ? attackerTop.card.id : null)
+  const attackerArts = useMemo(() => (attackerDetail.detail?.arts ?? []).filter((a) => a.name || a.damage || a.effectText), [attackerDetail.detail])
+  const attackerPower = unitPower(state[attackerZone]) // パワーアップカウンターの合計（アーツのダメージに足す）
+
+  // パフォーマンスステップを出る（相手のターンになった・ステップが変わった）と、アーツの選択は、やめる
+  useEffect(() => {
+    if (!performing) {
+      setAttackArt(null)
+      setArtModalOpen(false)
+    }
+  }, [performing])
+
+  const advancePhase = (phase: TurnPhase) => setTurn({ ...turnRef.current, phase })
+
+  // ドローステップ：1枚引いて、エールステップへ
+  const handleDrawStep = () => {
+    if (turnRef.current.phase !== 'draw') return // 続けて2回押されても、1枚だけ引く
+    if (stateRef.current[zoneId(stepSide, 'deck')].length === 0) setMessage('デッキにカードがありません。ドローせずに進みます')
+    else draw(stepSide, 1)
+    advancePhase('yell')
+  }
+
+  // エールステップを飛ばす
+  const skipYell = () => {
+    setMessage('エールステップを飛ばしました。メインステップです')
+    advancePhase('main')
+  }
+
+  // エールデッキが空・ステージにホロメンがいないときは、エールステップを自動で飛ばす
+  useEffect(() => {
+    if (!canAct || turn.phase !== 'yell') return
+    if (state[zoneId(stepSide, 'yellDeck')].length === 0) {
+      setMessage('エールデッキにカードがないため、エールステップを飛ばしました。メインステップです')
+      advancePhase('main')
+    } else if (yellTargetZones(state, stepSide).length === 0) {
+      setMessage('ステージにホロメンがいないため、エールステップを飛ばしました。メインステップです')
+      advancePhase('main')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canAct, turn.phase, turn.active, state])
+
+  // 光っている枠を、クリック（タップ）したとき
+  const handlePickZone = (zone: ZoneId) => {
+    if (!canAct) return
+    if (turnRef.current.phase === 'yell') {
+      const yellDeck = zoneId(stepSide, 'yellDeck')
+      const list = stateRef.current[yellDeck]
+      const top = list[list.length - 1]
+      if (!top) return
+      const name = unitParts(stateRef.current[zone]).top?.card.card_name ?? ''
+      pushFx({ kind: 'fly', from: yellDeck, to: zone, card: top.card })
+      setState((s) => attachYellFromDeck(s, stepSide, zone))
+      advancePhase('main')
+      setMessage(`エールデッキの上の1枚を、${name}につけました。メインステップです`)
+      return
+    }
+    if (turnRef.current.phase !== 'performance') return
+    if (!attackArt) {
+      setArtModalOpen(true) // センターのホロメンを選んだ：使うアーツを選ぶ
+      return
+    }
+    // ダメージを与える相手を選んだ：アーツのダメージ ＋ パワーアップ ＋ （相手の色が特攻対象色なら）特攻ダメージ
+    const target = unitParts(stateRef.current[zone]).top
+    const colors = parseAttribute(target?.card.attribute ?? '').colors
+    const r = calcArtDamage(attackArt, attackerPower, colors)
+    const parts = [String(r.base)]
+    if (r.power > 0) parts.push(`パワーアップ+${r.power}`)
+    if (r.special > 0) parts.push(`特攻+${r.special}`)
+    const note = `${attackerTop?.card.card_name ?? ''}の「${attackArt.name || 'アーツ'}」：${parts.join('、')} ＝ ${r.total}`
+    setAttackArt(null)
+    if (r.total <= 0) {
+      setMessage(`${note}（ダメージが0のため、何も起きません）`)
+      return
+    }
+    damageUnit(zone, r.total, stateRef.current, note)
+  }
+
+  // 枠を選ばせるモード（盤面の、光る枠）
+  const pick = useMemo<PickState | null>(() => {
+    if (!canAct) return null
+    if (turn.phase === 'yell') {
+      const zones = yellTargetZones(state, stepSide)
+      return zones.length > 0 ? { zones, color: '#4ce0e6' } : null
+    }
+    if (turn.phase === 'performance') {
+      if (attackArt) {
+        const zones = attackTargetZones(state, stepOther)
+        return zones.length > 0 ? { zones, color: '#ef4444' } : null
+      }
+      if (!artModalOpen && attackerTop) return { zones: [attackerZone], color: '#ffd76a' }
+    }
+    return null
+  }, [canAct, turn.phase, state, stepSide, stepOther, attackArt, artModalOpen, attackerTop, attackerZone])
+
+  // 画面の上に出す、いまのステップの案内
+  const stepPrompt: { text: string; action?: { label: string; run: () => void } } | null = !canAct
+    ? null
+    : turn.phase === 'yell'
+      ? { text: 'エールステップ：エールデッキの上の1枚を、つけるホロメンをクリック（タップ）してください', action: { label: 'スキップ', run: skipYell } }
+      : turn.phase === 'performance'
+        ? attackArt
+          ? { text: attackTargetZones(state, stepOther).length > 0 ? `「${attackArt.name || 'アーツ'}」でダメージを与える相手（コラボ・センター・バック）を、クリック（タップ）してください` : '相手のステージにホロメンがいません', action: { label: 'やめる', run: () => setAttackArt(null) } }
+          : attackerTop
+            ? { text: 'パフォーマンスステップ：アーツを使う、センターのホロメンをクリック（タップ）してください' }
+            : { text: 'パフォーマンスステップ：センターにホロメンがいません。「パフォーマンスステップ終了」で、ターンを終えます' }
+        : null
+
+  // ターンのボタン：メインステップ終了 → パフォーマンスステップへ／パフォーマンスステップ終了 → ターンチェンジ。
+  // ターンチェンジ：SUPPORT（旧ログ）のカードをアーカイブへ／相手のターン数を+1／相手のステージの警告マークを消す／盤面の背景（ターンを進める側が紺色）を入れ替える。次の側は、ドローステップから始まる
   const handleTurnChange = (side: Side) => {
-    if (versus && side === 'opp') return // 対戦中、相手のターンチェンジは、押せない（相手が、自分の画面で押す）
-    const r = endTurn(stateRef.current, turnRef.current, side)
+    if (versus && side === 'opp') return // 対戦中、相手のボタンは、押せない（相手が、自分の画面で押す）
+    const t = turnRef.current
+    if (side !== t.active) {
+      setMessage('いまは、相手のターンです')
+      return
+    }
+    if (t.phase === 'draw' || t.phase === 'yell') {
+      setMessage(t.phase === 'draw' ? 'ドローステップです。デッキをクリックして、1枚引いてください' : 'エールステップです。エールをつけるホロメンを選んでください')
+      return
+    }
+    if (t.phase === 'main') {
+      setTurn({ ...t, phase: 'performance' })
+      setMessage('パフォーマンスステップです。アーツを使うセンターのホロメンを、クリック（タップ）してください')
+      return
+    }
+    const r = endTurn(stateRef.current, t, side)
     const other: Side = side === 'me' ? 'opp' : 'me'
     const next = hideRevealed(r.state, other) // 相手が公開していたカードは、非公開に戻す
     setState(next)
     setTurn(r.turn)
     const name = (s: Side) => (s === 'me' ? '自分' : '相手')
-    setMessage(`${name(side)}のターンを終えました。${r.sent > 0 ? `SUPPORT のカード${r.sent}枚を、アーカイブへ送りました。` : ''}${next !== r.state ? `${name(other)}の公開中のカードは、非公開に戻しました。` : ''}${name(other)}は${r.turn[other]}ターン目です`)
+    setMessage(`${name(side)}のターンを終えました。${r.sent > 0 ? `SUPPORT のカード${r.sent}枚を、アーカイブへ送りました。` : ''}${next !== r.state ? `${name(other)}の公開中のカードは、非公開に戻しました。` : ''}${name(other)}は${r.turn[other]}ターン目です（ドローステップ）`)
   }
 
   // 手札の左のボタン：手札を、全てデッキに戻す（シャッフルはしない）／手札を並び替える（デッキの並びと同じ：ホロメン→サポート→その他）
@@ -858,7 +1005,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
     const t = turnRef.current
     const first: Side = t.first === 'me' ? 'opp' : 'me'
     // 先攻になった人が1、後攻になった人が0。先攻が、ターンを進める側になる
-    setTurn({ first, active: first, me: first === 'me' ? 1 : 0, opp: first === 'opp' ? 1 : 0 })
+    setTurn({ first, active: first, me: first === 'me' ? 1 : 0, opp: first === 'opp' ? 1 : 0, phase: 'main' })
   }
 
   // RESET：自分の（ひとりのときは、両方の）カードを、デッキ・エールデッキに戻して、シャッフルして、推しのライフ分をライフに置く（初期状態）
@@ -883,7 +1030,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
     })
     // ターン数も、最初に戻す（先攻・後攻はそのまま。先攻が1ターン目、後攻が0ターン目で、先攻がターンを進める側）
     const t = turnRef.current
-    setTurn({ first: t.first, active: t.first, me: t.first === 'me' ? 1 : 0, opp: t.first === 'opp' ? 1 : 0 })
+    setTurn({ first: t.first, active: t.first, me: t.first === 'me' ? 1 : 0, opp: t.first === 'opp' ? 1 : 0, phase: 'main' })
     sides.forEach((sd) => {
       pushFx({ kind: 'shuffle', zone: zoneId(sd, 'deck') })
       pushFx({ kind: 'shuffle', zone: zoneId(sd, 'yellDeck') })
@@ -1021,7 +1168,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
 
   // 盤面（PlayfieldBoard）へ渡す処理。盤面は、データが変わったときだけ描き直す（メモ化）ので、渡す関数は変わらないものにして、
   // 呼ばれたときに、そのときの最新の処理（boardHandlers.current）を呼ぶ。これで、古い盤面を見た処理が呼ばれることはない
-  type BoardHandlers = Pick<BoardProps, 'onTurnChange' | 'onToggleFirst' | 'onHandReturnAll' | 'onHandSort' | 'onInspect' | 'onToggleSkill' | 'onDragStart' | 'onDeckMenu' | 'onTouchDragStart' | 'onDragEnd' | 'onDragOverZone' | 'onDropZone' | 'onZoneTap' | 'onSelect' | 'onToggleRest' | 'onFlip' | 'onPreview' | 'onOpenZone'>
+  type BoardHandlers = Pick<BoardProps, 'onTurnChange' | 'onToggleFirst' | 'onHandReturnAll' | 'onHandSort' | 'onInspect' | 'onToggleSkill' | 'onDragStart' | 'onDeckMenu' | 'onTouchDragStart' | 'onDragEnd' | 'onDragOverZone' | 'onDropZone' | 'onZoneTap' | 'onSelect' | 'onToggleRest' | 'onFlip' | 'onPreview' | 'onOpenZone' | 'onPickZone'>
   const boardHandlers = useRef<BoardHandlers | null>(null)
   useEffect(() => {
     boardHandlers.current = {
@@ -1052,6 +1199,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
         setDeckMenu(null)
         setViewer(z)
       },
+      onPickZone: handlePickZone,
     }
   })
   const stableBoardHandlers = useMemo<BoardHandlers>(
@@ -1074,6 +1222,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
       onFlip: (uid) => boardHandlers.current!.onFlip(uid),
       onPreview: (c) => boardHandlers.current!.onPreview(c),
       onOpenZone: (z) => boardHandlers.current!.onOpenZone(z),
+      onPickZone: (zone) => boardHandlers.current!.onPickZone(zone),
     }),
     []
   )
@@ -1327,6 +1476,37 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
           </button>
         </div>
       )}
+      {/* ドローステップ：デッキを中央に出して、クリックで1枚引く（ターンを進める側の画面だけ） */}
+      {canAct && turn.phase === 'draw' && <DrawStepOverlay count={state[zoneId(stepSide, 'deck')].length} title={`${stepSide === 'me' ? myDisplayName : oppDisplayName}のドローステップ`} onDraw={handleDrawStep} onSkip={() => advancePhase('yell')} />}
+      {/* エール・パフォーマンスステップの案内 */}
+      {stepPrompt && (
+        <div
+          role="status"
+          className="fixed z-[74] flex items-center gap-2 rounded-lg border-2 border-[#ffd76a]/80 bg-[#061217]/95 px-3 py-2 text-xs font-bold text-[#fff3b0] shadow-lg"
+          style={{ top: `calc(${(fullscreen || versus ? 8 : 60) + 54}px + env(safe-area-inset-top, 0px))`, left: 8, right: 8, maxWidth: 560, marginLeft: 'auto', marginRight: 'auto' }}
+        >
+          <span className="min-w-0 flex-1">{stepPrompt.text}</span>
+          {stepPrompt.action && (
+            <button type="button" className="btn-secondary shrink-0 whitespace-nowrap" onClick={stepPrompt.action.run}>
+              {stepPrompt.action.label}
+            </button>
+          )}
+        </div>
+      )}
+      {artModalOpen && attackerTop && (
+        <ArtPickModal
+          card={attackerTop.card}
+          arts={attackerArts}
+          loading={attackerDetail.loading}
+          error={attackerDetail.error}
+          power={attackerPower}
+          onPick={(a) => {
+            setAttackArt(a)
+            setArtModalOpen(false)
+          }}
+          onClose={() => setArtModalOpen(false)}
+        />
+      )}
       {turnBanner && <TurnChangeBanner key={turnBanner.id} side={turnBanner.side} title={turnBanner.title} sub={turnBanner.sub} onDone={closeTurnBanner} />}
       {winner && (
         <VictoryModal
@@ -1489,6 +1669,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
             oshiSkills={oshiSkills}
             skillUsed={skillUsed}
             hpOf={hpOf}
+            pick={pick}
             {...stableBoardHandlers}
           />
         </section>

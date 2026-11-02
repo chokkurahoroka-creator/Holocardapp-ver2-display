@@ -516,28 +516,66 @@ export function skillCost(raw: string | null | undefined): number {
   return Number(half.replace(/[^\d]/g, '')) || 0
 }
 
+// ===== アーツのダメージ計算 =====
+
+// 「50」「50+」「５０」「+50」などの文字列から、数字だけを取り出す（数字が無ければ 0）
+export function parseDamage(raw: string | null | undefined): number {
+  const half = String(raw ?? '').replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+  const m = /\d+/.exec(half)
+  return m ? Number(m[0]) : 0
+}
+
+export type ArtDamageInput = { damage: string; specialAttackColor: string; specialAttackDamage: string }
+export type ArtDamageResult = { base: number; power: number; special: number; total: number }
+
+// アーツのダメージ ＝ アーツの数値 ＋ 攻撃するホロメンに乗っているパワーアップ ＋ （相手の色が特攻対象色なら）特攻ダメージ。
+// targetColors は、ダメージを受けるホロメンの色（「赤」「青」など。多色は、複数）
+export function calcArtDamage(art: ArtDamageInput, power: number, targetColors: string[]): ArtDamageResult {
+  const base = parseDamage(art.damage)
+  const special = art.specialAttackColor && targetColors.includes(art.specialAttackColor) ? parseDamage(art.specialAttackDamage) : 0
+  return { base, power, special, total: base + power + special }
+}
+
+// 攻撃できるホロメンがいる、その側のゾーン（アーツのダメージを与える相手の、コラボ・センター・バック）
+export function attackTargetZones(state: PlayState, side: Side): ZoneId[] {
+  return (['collab', 'center', 'back1', 'back2', 'back3', 'back4', 'back5'] as const).map((k) => zoneId(side, k)).filter((id) => isDamageableZone(state, id))
+}
+
+// エールステップで、エールをつけられる、その側の枠（センター・コラボ・バックのホロメン）
+export function yellTargetZones(state: PlayState, side: Side): ZoneId[] {
+  return attackTargetZones(state, side)
+}
+
 // ===== ターン =====
+
+// ターンの中のステップ：draw（ドロー）→ yell（エール）→ main（メイン）→ performance（パフォーマンス）。
+// ゲーム開始時と、先攻・後攻の入れ替え・RESET のあとは main から始める（準備は、手で進めるため）。ターンチェンジのあとは、draw から始まる
+export type TurnPhase = 'draw' | 'yell' | 'main' | 'performance'
+export const TURN_PHASES: TurnPhase[] = ['draw', 'yell', 'main', 'performance']
+export const PHASE_LABEL: Record<TurnPhase, string> = { draw: 'ドロー', yell: 'エール', main: 'メイン', performance: 'パフォーマンス' }
 
 export type TurnState = {
   first: Side // 先攻の側
   active: Side // いま、ターンを進めている側（盤面の背景が、紺色になる）
   me: number // 自分が、何ターン目か
   opp: number // 相手が、何ターン目か
+  phase: TurnPhase // いま、ターンのどのステップか
 }
 
-export const initialTurn = (): TurnState => ({ first: 'me', active: 'me', me: 1, opp: 0 })
+export const initialTurn = (): TurnState => ({ first: 'me', active: 'me', me: 1, opp: 0, phase: 'main' })
 
 export function normalizeTurn(raw: unknown): TurnState {
   const t = (raw ?? {}) as Partial<TurnState>
   const side = (v: unknown, d: Side): Side => (v === 'me' || v === 'opp' ? v : d)
   const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : d)
-  return { first: side(t.first, 'me'), active: side(t.active, 'me'), me: num(t.me, 1), opp: num(t.opp, 0) }
+  const phase: TurnPhase = TURN_PHASES.includes(t.phase as TurnPhase) ? (t.phase as TurnPhase) : 'main' // 古い保存データには、ステップが無い
+  return { first: side(t.first, 'me'), active: side(t.active, 'me'), me: num(t.me, 1), opp: num(t.opp, 0), phase }
 }
 
 // 自分と相手を入れ替えた、ターンの状態（対戦で、ゲストの画面に出す向きにするため。二度かけると、元に戻る）
 export function swapTurn(t: TurnState): TurnState {
   const other = (s: Side): Side => (s === 'me' ? 'opp' : 'me')
-  return { first: other(t.first), active: other(t.active), me: t.opp, opp: t.me }
+  return { first: other(t.first), active: other(t.active), me: t.opp, opp: t.me, phase: t.phase }
 }
 
 const STAGE_KEYS: ZoneKey[] = ['center', 'collab', 'back1', 'back2', 'back3', 'back4', 'back5']
@@ -556,6 +594,7 @@ export function clearFresh(state: PlayState, side: Side): PlayState {
 // ・ログのカードを、それぞれの側のアーカイブへ送る
 // ・相手（次のターンの側）のターン数を＋1して、その側を、ターンを進める側にする
 // ・相手のステージの、登場したターンの印を消す
+// ・次の側は、ドローステップから始まる
 export function endTurn(state: PlayState, turn: TurnState, ender: Side): { state: PlayState; turn: TurnState; sent: number } {
   const other: Side = ender === 'me' ? 'opp' : 'me'
   let next = state
@@ -567,7 +606,7 @@ export function endTurn(state: PlayState, turn: TurnState, ender: Side): { state
     }
   }
   next = clearFresh(next, other)
-  return { state: next, turn: { ...turn, active: other, [other]: turn[other] + 1 }, sent }
+  return { state: next, turn: { ...turn, active: other, [other]: turn[other] + 1, phase: 'draw' }, sent }
 }
 
 // その側の、全てのカード（推しを除く）を、デッキ・エールデッキに戻して（エールはエールデッキ、ほかはデッキ）、
