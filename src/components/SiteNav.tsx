@@ -1,3 +1,4 @@
+
 import { Link, useLocation } from 'react-router-dom'
 import { useSiteStatus } from '../hooks/useSiteStatus'
 
@@ -155,6 +156,13 @@ export function SiteNav() {
               {l.label}
             </Link>
           ))}
+          {/* 対戦ページは、別のページ（versus.html）なので、ページ全体を、読み込み直して、開く（<Link> ではなく、<a>） */}
+          <a href="/versus" className="hud-nav-item hud-font">
+            <span className="hud-mono code" style={{ fontSize: 10, opacity: 0.6 }}>
+              {String(LINKS.length + 1).padStart(2, '0')}
+            </span>
+            対戦
+          </a>
         </nav>
 
         <a

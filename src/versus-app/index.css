@@ -1,0 +1,190 @@
+/* このファイルは、管理画面（horoka-admin）から、同期したコピーです。直接は、直さないでください（node scripts/sync-versus.mjs で、上書きされます）。直すときは、管理画面側のファイルを直して、同期してください。 */
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+  --hud-void: #061217;
+  --hud-panel: #0b1e26;
+  --hud-line: #143844;
+  --hud-cyan: #4ce0e6;
+  --hud-coral: #ff8a5c;
+  --hud-ink: #d8f3f2;
+  --hud-ink-dim: #9fc3ca;
+}
+
+body {
+  background-color: var(--hud-void);
+  color: var(--hud-ink);
+  font-family: 'Inter', system-ui, sans-serif;
+  background-image:
+    linear-gradient(rgba(76, 224, 230, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(76, 224, 230, 0.035) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+/* 配信モードON: rem基準のTailwindクラス（text-sm等）が連動して少し大きくなる */
+html[data-stream-mode="on"] {
+  font-size: 113%;
+}
+
+.hud-font {
+  font-family: 'Rajdhani', 'Inter', system-ui, sans-serif;
+  letter-spacing: 0.02em;
+}
+
+.hud-mono {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+@layer components {
+  /* ===== 角を斜めにカットしたHUDパネル（左上・右下カット、残り2角にL字の縁取り） ===== */
+  .hud-panel {
+    position: relative;
+    background: var(--hud-panel);
+    border: 1px solid var(--hud-line);
+    clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+  }
+  .hud-panel::before,
+  .hud-panel::after {
+    content: '';
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    pointer-events: none;
+  }
+  .hud-panel::before {
+    top: 0;
+    right: 0;
+    border-top: 1px solid var(--hud-cyan);
+    border-right: 1px solid var(--hud-cyan);
+  }
+  .hud-panel::after {
+    bottom: 0;
+    left: 0;
+    border-bottom: 1px solid var(--hud-cyan);
+    border-left: 1px solid var(--hud-cyan);
+  }
+
+  /* 対戦の盤面：スマホでは、角の切り抜き（clip-path）をやめる。切り抜きがあると、中の描き直しのたびに、マスク処理が入るため */
+  @media (pointer: coarse) {
+    .hud-panel.hud-panel-flat {
+      clip-path: none;
+    }
+  }
+
+  /* ===== 入力系 ===== */
+  .field {
+    @apply w-full rounded-md px-3 py-2 text-sm
+           transition-colors duration-150
+           focus:outline-none
+           disabled:opacity-40 disabled:cursor-not-allowed;
+    background: rgba(76, 224, 230, 0.04);
+    border: 1px solid var(--hud-line);
+    color: var(--hud-ink);
+  }
+  .field:focus {
+    border-color: var(--hud-cyan);
+    box-shadow: 0 0 0 1px rgba(76, 224, 230, 0.4), 0 0 8px rgba(76, 224, 230, 0.25);
+  }
+  .field::placeholder {
+    color: #6f97a0;
+  }
+
+  .field-label {
+    @apply block text-xs mb-1;
+    font-family: 'Rajdhani', 'Inter', system-ui, sans-serif;
+    color: var(--hud-ink-dim);
+    letter-spacing: 0.04em;
+  }
+
+  /* ===== ボタン共通 ===== */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-semibold
+           transition-colors duration-150
+           disabled:opacity-40 disabled:cursor-not-allowed;
+    font-family: 'Rajdhani', 'Inter', system-ui, sans-serif;
+    letter-spacing: 0.02em;
+    background: var(--hud-cyan);
+    color: #04232a;
+  }
+  .btn-primary:hover {
+    background: #6de8ed;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium
+           transition-colors duration-150
+           disabled:opacity-40 disabled:cursor-not-allowed;
+    font-family: 'Rajdhani', 'Inter', system-ui, sans-serif;
+    letter-spacing: 0.02em;
+    background: transparent;
+    border: 1px solid var(--hud-line);
+    color: var(--hud-ink-dim);
+  }
+  .btn-secondary:hover {
+    border-color: var(--hud-cyan);
+    color: var(--hud-ink);
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium
+           transition-colors duration-150
+           disabled:opacity-40 disabled:cursor-not-allowed;
+    font-family: 'Rajdhani', 'Inter', system-ui, sans-serif;
+    letter-spacing: 0.02em;
+    background: transparent;
+    border: 1px solid rgba(255, 138, 92, 0.4);
+    color: var(--hud-coral);
+  }
+  .btn-danger:hover {
+    background: rgba(255, 138, 92, 0.1);
+  }
+
+  .btn-icon {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-sm
+           transition-colors duration-150
+           disabled:opacity-40 disabled:cursor-not-allowed;
+    background: transparent;
+    color: var(--hud-ink-dim);
+  }
+  .btn-icon:hover {
+    color: var(--hud-cyan);
+  }
+}
+
+@layer components {
+  .hud-nav-item {
+    color: var(--hud-ink-dim);
+    border-left: 2px solid transparent;
+  }
+  .hud-nav-item:hover {
+    color: var(--hud-ink);
+    background: rgba(76, 224, 230, 0.06);
+  }
+  .hud-nav-item.active {
+    background: rgba(76, 224, 230, 0.12);
+    color: var(--hud-cyan);
+    border-left: 2px solid var(--hud-cyan);
+  }
+}
+
+/* ===== レア度演出（カード一覧のサムネイル枠・レア度ごとに個別設定） ===== */
+@keyframes hud-holo-shift {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+@keyframes hud-glow-pulse-color {
+  0%, 100% { box-shadow: 0 0 8px var(--pulse-color, rgba(255,255,255,0.3)); }
+  50% { box-shadow: 0 0 18px var(--pulse-color-strong, rgba(255,255,255,0.7)); }
+}
+@keyframes hud-shine-sweep-hover {
+  0% { transform: translateX(-160%) rotate(-22deg); }
+  100% { transform: translateX(220%) rotate(-22deg); }
+}
+/* マウスのある端末だけ動かす（スマホは、タップしたあとも :hover が残り、アニメーションが止まらなくなるため） */
+@media (hover: hover) {
+  .group:hover .hud-sweep {
+    animation: hud-shine-sweep-hover 1s ease-in-out infinite;
+  }
+}

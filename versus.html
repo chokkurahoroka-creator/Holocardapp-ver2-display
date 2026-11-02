@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- ファビコン・アプリアイコン（画像ファイルは public/ 直下に置く。index.html と同じもの） -->
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <meta name="theme-color" content="#061217" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="robots" content="noindex, nofollow" />
+    <!-- 対戦ページの見た目（HUD風のフォント）。サイト本体の画面とは、別のページ（別のCSS）なので、ここで読み込む -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,600;1,400&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet" />
+    <!-- スマホ（タッチ端末）で入力欄を押したときに、画面が勝手に拡大されるのを防ぐ。
+         iPhoneは、入力欄の文字が16px未満だと拡大するため、入力欄だけ16px以上にそろえる -->
+    <style>
+      @media (hover: none) and (pointer: coarse) {
+        input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not([type='button']):not([type='submit']),
+        select,
+        textarea {
+          font-size: 16px !important;
+        }
+      }
+    </style>
+    <title>ホロカ 対戦ルーム</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/versus-app/versus-main.tsx"></script>
+  </body>
+</html>
