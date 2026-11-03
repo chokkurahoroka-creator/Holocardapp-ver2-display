@@ -6,7 +6,7 @@ import type { GhostSpec } from '../hooks/useTouchDrag'
 import { backStyleOf } from '../utils/cardBack'
 import { setScaledDragImage } from '../utils/dragImage'
 import { ATTRIBUTE_COLORS, COLORLESS, parseAttribute } from '../utils/attribute'
-import { HALF_GAP, HALF_H, HALF_W, LOG_FRAME_H, LOG_LABEL_H, LOG_PAD, LOG_W, LOG_X, MAT_H, SIDE_PANEL_W, SIDE_PANEL_X, ZONES, skillCost, handRowLayout, ZONE_BY_KEY, findCard, slotBlocked, parseZone, archiveSplit, isDamageableZone, unitDamage, unitHpUp, unitPower, unitParts, zoneId, PHASE_LABEL, type PlayCard, type PlayState, type Side, type TurnState, type ZoneDef, type ZoneId, type ZoneKey } from '../utils/playfield'
+import { HALF_GAP, HALF_H, HALF_W, LOG_FRAME_H, LOG_LABEL_H, LOG_PAD, LOG_W, LOG_X, MAT_H, SIDE_PANEL_W, SIDE_PANEL_X, ZONES, skillCost, handRowLayout, ZONE_BY_KEY, findCard, slotBlocked, parseZone, archiveSplit, isDamageableZone, unitDamage, unitHpUp, unitPower, unitParts, zoneId, PHASE_LABEL, type BloomStage, type PlayCard, type PlayState, type Side, type TurnState, type ZoneDef, type ZoneId, type ZoneKey } from '../utils/playfield'
 
 // ドラッグ中のもの。card: 1枚のカード／unit: 枠の中身全体（ブルーム・サポート・エールごと）／search: 検索結果（新しいカード）／damage: ダメージカウンター
 export type PlayDrag = { kind: 'card'; uid: string } | { kind: 'unit'; zone: ZoneId } | { kind: 'search'; card: DeckCard } | { kind: 'damage'; amount: number; from?: ZoneId } | { kind: 'power'; amount: number; from?: ZoneId } | { kind: 'hp'; amount: number; from?: ZoneId } | null
@@ -17,7 +17,7 @@ export type DragItem = NonNullable<PlayDrag>
 export type PickState = { zones: ZoneId[]; color: string }
 
 // アニメーション。shuffle: そのゾーンのカードをシャッフルする動き／down: ダメージで倒されたホロメンが、アーカイブへ飛んでいく動き
-export type PlayFxInput = { kind: 'shuffle'; zone: ZoneId } | { kind: 'down' | 'fly'; from: ZoneId; to: ZoneId; card: DeckCard } // fly：カードが、1枚、別のゾーンへ飛んでいく（ホロパワーのアーカイブなど）
+export type PlayFxInput = { kind: 'shuffle'; zone: ZoneId } | { kind: 'down' | 'fly'; from: ZoneId; to: ZoneId; card: DeckCard } | { kind: 'bloom'; zone: ZoneId; stage: BloomStage; label: string } // bloom：ブルームした枠の、演出（相手の画面へは送らない。それぞれの画面で、盤面の変化から出す） // fly：カードが、1枚、別のゾーンへ飛んでいく（ホロパワーのアーカイブなど）
 export type PlayFx = PlayFxInput & { id: number }
 
 const FX_CSS = `
@@ -32,10 +32,22 @@ const FX_CSS = `
  32%{transform:translate(0,0) scale(1.04);filter:drop-shadow(0 0 22px #ef4444) brightness(1.3)}
  100%{transform:translate(var(--dx),var(--dy)) scale(.55) rotate(16deg);opacity:0;filter:drop-shadow(0 0 10px #ef4444)}}
 @keyframes pf-fly{0%{transform:translate(0,0) scale(1) rotate(0);opacity:1}100%{transform:translate(var(--dx),var(--dy)) scale(.62) rotate(-12deg);opacity:0}}
+@keyframes pf-bloom-flash{0%{opacity:0;transform:scale(.6)}18%{opacity:.95}100%{opacity:0;transform:scale(1.3)}}
+@keyframes pf-bloom-ring{0%{transform:scale(.5);opacity:.95}100%{transform:scale(1.55);opacity:0}}
+@keyframes pf-bloom-spark{0%{transform:translate(-50%,-50%) rotate(var(--a)) translateY(0) scale(.4);opacity:0}15%{opacity:1}100%{transform:translate(-50%,-50%) rotate(var(--a)) translateY(calc(var(--r) * -1)) scale(1);opacity:0}}
+@keyframes pf-bloom-text{0%{transform:scale(.3);opacity:0}18%{transform:scale(1.2);opacity:1}62%{transform:scale(1);opacity:1}100%{transform:translateY(-26px) scale(1);opacity:0}}
+@keyframes pf-bloom-shine{0%{transform:translateX(-130%) skewX(-20deg);opacity:0}25%{opacity:.9}100%{transform:translateX(230%) skewX(-20deg);opacity:0}}
 @keyframes pf-down-flash{0%{opacity:0}12%{opacity:.75}100%{opacity:0}}
 @keyframes pf-down-text{0%{transform:scale(.4);opacity:0}15%{transform:scale(1.25);opacity:1}55%{transform:scale(1);opacity:1}100%{transform:translateY(-24px) scale(1);opacity:0}}
 @media (prefers-reduced-motion: reduce){.pf-fx{display:none!important}}
 `
+
+// ブルームの演出の色：1st＝緑、Buzzの1st＝橙、2nd＝紫（と、金の輪）
+const BLOOM_STYLE: Record<BloomStage, { main: string; glow: string; sparks: number; rings: number }> = {
+  first: { main: '#6ee7a0', glow: 'rgba(110,231,160,0.6)', sparks: 10, rings: 2 },
+  buzz: { main: '#ffb347', glow: 'rgba(255,179,71,0.65)', sparks: 12, rings: 2 },
+  second: { main: '#c084fc', glow: 'rgba(192,132,252,0.7)', sparks: 16, rings: 3 },
+}
 
 // デッキにドロップしたときの位置。top: デッキトップ（上半分）／bottom: デッキの一番下（下半分）
 export type DropPos = 'top' | 'bottom'
@@ -711,6 +723,7 @@ function ZoneView({ def, side, p }: { def: ZoneDef; side: Side; p: BoardProps })
   const downTo = downFx && downFx.kind === 'down' ? parseZone(downFx.to) : null
   const downDef = downTo ? ZONE_BY_KEY.get(downTo.key) : undefined
   const flyFxs = p.fx.filter((f) => f.kind === 'fly' && f.from === id)
+  const bloomFx = p.fx.find((f) => f.kind === 'bloom' && f.zone === id)
   return (
     <>
       <div
@@ -869,6 +882,49 @@ function ZoneView({ def, side, p }: { def: ZoneDef; side: Side; p: BoardProps })
             </div>
           )
         })}
+        {/* ブルームのアニメーション：進化レベルの色で光って、輪とキラキラが広がり、カードの上を光が走る */}
+        {bloomFx && bloomFx.kind === 'bloom' && (() => {
+          const c = BLOOM_STYLE[bloomFx.stage]
+          const big = Math.min(def.w * 0.2, 54)
+          return (
+            <div key={bloomFx.id} className="pf-fx" style={{ position: 'absolute', inset: 0, zIndex: 42, pointerEvents: 'none' }}>
+              <div style={{ position: 'absolute', inset: -10, borderRadius: 16, background: `radial-gradient(circle, ${c.glow} 0%, rgba(0,0,0,0) 72%)`, animation: 'pf-bloom-flash 1.2s ease-out forwards' }} />
+              {Array.from({ length: c.rings }, (_, i) => (
+                <div key={i} style={{ position: 'absolute', inset: 0, borderRadius: 14, border: `${7 - i}px solid ${i === 2 ? '#ffd76a' : c.main}`, boxShadow: `0 0 26px ${i === 2 ? '#ffd76a' : c.main}`, opacity: 0, animation: `pf-bloom-ring 1.05s ease-out ${i * 0.22}s forwards` }} />
+              ))}
+              <div style={{ position: 'absolute', inset: 0, borderRadius: 12, overflow: 'hidden' }}>
+                <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: '45%', background: `linear-gradient(90deg, rgba(255,255,255,0), ${c.main}, rgba(255,255,255,0.85), rgba(255,255,255,0))`, mixBlendMode: 'screen', opacity: 0, animation: 'pf-bloom-shine 0.9s ease-out 0.15s forwards' }} />
+              </div>
+              {Array.from({ length: c.sparks }, (_, i) => (
+                <div
+                  key={i}
+                  style={
+                    {
+                      position: 'absolute',
+                      left: '50%',
+                      top: '50%',
+                      width: i % 2 ? 16 : 24,
+                      height: i % 2 ? 16 : 24,
+                      background: i % 3 === 0 ? '#fff' : c.main,
+                      clipPath: 'polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%)',
+                      filter: `drop-shadow(0 0 6px ${c.main})`,
+                      opacity: 0,
+                      '--a': `${(360 / c.sparks) * i}deg`,
+                      '--r': `${def.h * (i % 2 ? 0.62 : 0.82)}px`,
+                      animation: `pf-bloom-spark 1.1s ease-out ${(i % 4) * 0.05}s forwards`,
+                    } as CSSProperties
+                  }
+                />
+              ))}
+              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transform: side === 'opp' ? 'rotate(180deg)' : undefined }}>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1.05, fontWeight: 900, color: '#fff', textShadow: `0 0 12px ${c.main}, 0 0 4px ${c.main}, 0 3px 6px rgba(0,0,0,0.9)`, animation: 'pf-bloom-text 1.5s ease-out forwards', opacity: 0 }}>
+                  <span style={{ fontSize: Math.round(big * 0.72), color: c.main, letterSpacing: 1 }}>{bloomFx.label}</span>
+                  <span style={{ fontSize: Math.round(big), letterSpacing: 2 }}>BLOOM</span>
+                </div>
+              </div>
+            </div>
+          )
+        })()}
         {/* ダウンのアニメーション：赤く光って震え、アーカイブへ飛んでいく */}
         {downFx && downFx.kind === 'down' && downDef && (
           <div key={downFx.id} className="pf-fx" style={{ position: 'absolute', inset: 0, zIndex: 40, pointerEvents: 'none' }}>

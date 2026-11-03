@@ -657,3 +657,52 @@ export function normalizeState(raw: unknown): PlayState {
   })
   return base
 }
+
+// ===== ブルーム・サポート発動の検出（盤面の変化から、演出を出すための判定） =====
+
+export type BloomStage = 'first' | 'buzz' | 'second'
+export type BloomEvent = { zone: ZoneId; stage: BloomStage; label: string; card: DeckCard }
+
+// ブルームの演出を出す進化レベル：1st・Buzzの1st（1stBuzz）・2nd。Debut・Spot は、出さない
+export function bloomStageOf(card: DeckCard): BloomStage | null {
+  const t = (card.stage ?? '').trim().toLowerCase()
+  if (t.startsWith('2nd')) return 'second'
+  if (t.startsWith('1st')) return t.includes('buzz') || (card.card_type ?? '').includes('Buzz') ? 'buzz' : 'first'
+  return null
+}
+
+const BLOOM_LABEL: Record<BloomStage, string> = { first: '1st', buzz: 'Buzz 1st', second: '2nd' }
+
+// 前の盤面と、いまの盤面を比べて、ブルームした枠を見つける。
+// 条件：ステージの枠（センター・コラボ・バック）で、もとのカードが全部そのまま残り、ホロメンが増えて、いちばん上が新しいカードになった（入れ替えや、枠から枠への移動は、除く）。
+// いちばん上のカードが、1st・Buzzの1st・2nd のときだけ
+export function detectBlooms(prev: PlayState, next: PlayState): BloomEvent[] {
+  const out: BloomEvent[] = []
+  for (const side of ['me', 'opp'] as const) {
+    for (const k of STAGE_KEYS) {
+      const id = zoneId(side, k)
+      const before = prev[id]
+      const after = next[id]
+      if (before === after) continue
+      const beforeHolo = unitParts(before).holomen.filter((c) => !isOshiCard(c.card))
+      const afterHolo = unitParts(after).holomen.filter((c) => !isOshiCard(c.card))
+      if (beforeHolo.length === 0 || afterHolo.length <= beforeHolo.length) continue
+      if (!before.every((c) => after.some((a) => a.uid === c.uid))) continue
+      const top = afterHolo[afterHolo.length - 1]!
+      if (before.some((c) => c.uid === top.uid)) continue
+      const from = findCard(prev, top.uid)
+      if (from && isSlotZone(from.zone)) continue // 別の枠から動かしてきたもの
+      const stage = bloomStageOf(top.card)
+      if (!stage) continue
+      out.push({ zone: id, stage, label: BLOOM_LABEL[stage], card: top.card })
+    }
+  }
+  return out
+}
+
+// サポート（SUPPORT）の置き場に、新しく置かれたカード（置いた順）
+export function detectSupportCasts(prev: PlayState, next: PlayState): { card: DeckCard; side: Side }[] {
+  const had = new Set((['me', 'opp'] as const).flatMap((s) => prev[zoneId(s, 'log')].map((c) => c.uid)))
+  const added = (['me', 'opp'] as const).flatMap((side) => next[zoneId(side, 'log')].filter((c) => !had.has(c.uid)).map((c) => ({ card: c.card, side, seq: c.logSeq ?? 0 })))
+  return added.sort((a, b) => a.seq - b.seq).map(({ card, side }) => ({ card, side }))
+}

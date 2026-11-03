@@ -27,6 +27,8 @@ import {
   compactBacks,
   attackTargetZones,
   calcArtDamage,
+  detectBlooms,
+  detectSupportCasts,
   endTurn,
   initialTurn,
   normalizeTurn,
@@ -85,6 +87,7 @@ import { VictoryModal } from './VictoryModal'
 import { TurnChangeBanner } from './TurnChangeBanner'
 import { DrawStepOverlay } from './DrawStepOverlay'
 import { ArtPickModal } from './ArtPickModal'
+import { SupportCastOverlay, type SupportCast } from './SupportCastOverlay'
 import { parseAttribute } from '../utils/attribute'
 import type { ArtRow } from '../types/artsSkills'
 import { winnerByLife } from '../utils/victory'
@@ -525,11 +528,12 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
   }
 
   const moveTargets = versus ? MOVE_TARGETS.filter((t) => t.id !== 'holder') : MOVE_TARGETS // 対戦中は、自分だけのホルダー（共有されない）は使わない
-  const pushFx = (fx: PlayFxInput, emit = true) => {
-    if (emit) versus?.onEmit({ kind: 'fx', fx })
+  // ms：演出を、盤面に出しておく時間。ブルームの演出は、相手の画面へは送らない（それぞれの画面で、盤面の変化から出す）
+  const pushFx = (fx: PlayFxInput, emit = true, ms = 1300) => {
+    if (emit && fx.kind !== 'bloom') versus?.onEmit({ kind: 'fx', fx })
     const id = ++fxSeq.current
     setFxList((l) => [...l, { ...fx, id }])
-    window.setTimeout(() => setFxList((l) => l.filter((f) => f.id !== id)), 1300)
+    window.setTimeout(() => setFxList((l) => l.filter((f) => f.id !== id)), ms)
   }
   // シャッフル（動きつき）
   const shuffle = (zone: ZoneId) => {
@@ -939,7 +943,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
         const zones = attackTargetZones(state, stepOther)
         return zones.length > 0 ? { zones, color: '#ef4444' } : null
       }
-      if (!artModalOpen && attackerTop) return { zones: [attackerZone], color: '#ffd76a' }
+      if (attackerTop) return { zones: [attackerZone], color: '#ffd76a' }
     }
     return null
   }, [canAct, turn.phase, state, stepSide, stepOther, attackArt, artModalOpen, attackerTop, attackerZone])
@@ -953,9 +957,25 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
         ? attackArt
           ? { text: attackTargetZones(state, stepOther).length > 0 ? `「${attackArt.name || 'アーツ'}」でダメージを与える相手（コラボ・センター・バック）を、クリック（タップ）してください` : '相手のステージにホロメンがいません', action: { label: 'やめる', run: () => setAttackArt(null) } }
           : attackerTop
-            ? { text: 'パフォーマンスステップ：アーツを使う、センターのホロメンをクリック（タップ）してください' }
+            ? { text: artModalOpen ? '使うアーツを選んでください' : 'パフォーマンスステップ：アーツを使う、センターのホロメンをクリック（タップ）してください' }
             : { text: 'パフォーマンスステップ：センターにホロメンがいません。「パフォーマンスステップ終了」で、ターンを終えます' }
         : null
+
+  // ===== 盤面の変化から出す演出：サポートの発動（画面の中央）・ブルーム（その枠） =====
+  // 相手が動かした分も、それぞれの画面で、盤面の変化から見つけて出す（最初の読み込み・空の盤面からの変化では、出さない）
+  const [castQueue, setCastQueue] = useState<SupportCast[]>([])
+  const castSeq = useRef(0)
+  const fxPrev = useRef(state)
+  useEffect(() => {
+    const prev = fxPrev.current
+    fxPrev.current = state
+    if (prev === state || countCards(prev) === 0) return
+    const casts = detectSupportCasts(prev, state)
+    if (casts.length > 0) setCastQueue((q) => [...q, ...casts.map((c) => ({ id: ++castSeq.current, card: c.card, who: versus ? (c.side === 'me' ? 'あなた' : '相手') : c.side === 'me' ? '自分' : '相手' }))])
+    for (const b of detectBlooms(prev, state)) pushFx({ kind: 'bloom', zone: b.zone, stage: b.stage, label: b.label }, false, 1900)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state])
+  const handleCastDone = useCallback((id: number) => setCastQueue((q) => q.filter((c) => c.id !== id)), [])
 
   // ターンのボタン：メインステップ終了 → パフォーマンスステップへ／パフォーマンスステップ終了 → ターンチェンジ。
   // ターンチェンジ：SUPPORT（旧ログ）のカードをアーカイブへ／相手のターン数を+1／相手のステージの警告マークを消す／盤面の背景（ターンを進める側が紺色）を入れ替える。次の側は、ドローステップから始まる
@@ -1493,8 +1513,10 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
           )}
         </div>
       )}
+      <SupportCastOverlay queue={castQueue} onDone={handleCastDone} />
       {artModalOpen && attackerTop && (
         <ArtPickModal
+          anchorZone={attackerZone}
           card={attackerTop.card}
           arts={attackerArts}
           loading={attackerDetail.loading}
