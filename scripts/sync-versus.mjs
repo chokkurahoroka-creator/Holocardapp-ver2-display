@@ -20,13 +20,16 @@ const outDir = resolve(root, 'src/versus-app')
 const check = process.argv.includes('--check')
 
 const FILES = [
+  'components/ArtPickModal.tsx',
   'components/CardEffects.tsx',
   'components/CardPreview.tsx',
   'components/DamageCounterStrip.tsx',
   'components/DeckMenu.tsx',
+  'components/DrawStepOverlay.tsx',
   'components/PlayLogPanel.tsx',
   'components/PlayfieldBoard.tsx',
   'components/PlayfieldPanel.tsx',
+  'components/SupportCastOverlay.tsx',
   'components/TurnChangeBanner.tsx',
   'components/VictoryModal.tsx',
   'hooks/useCardDetailForPreview.ts',
@@ -52,6 +55,7 @@ const FILES = [
   'versus-main.tsx',
   'versus/VersusApp.tsx',
   'versus/VersusLogin.tsx',
+  'versus/roomLink.ts',
   'versus/wire.ts',
 ]
 
