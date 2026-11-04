@@ -1,5 +1,7 @@
 // このファイルは、管理画面（horoka-admin）から、同期したコピーです。直接は、直さないでください（node scripts/sync-versus.mjs で、上書きされます）。直すときは、管理画面側のファイルを直して、同期してください。
 import type { DeckCard, DeckRecipe } from './deckImage'
+import type { ArtRow, YellCost } from '../types/artsSkills'
+import { ATTRIBUTE_COLORS, COLORLESS, parseAttribute } from './attribute'
 
 // ===== プレイフィールド（カードの擬似プレイ）の、盤面の定義とカードの移動処理 =====
 
@@ -526,20 +528,67 @@ export function parseDamage(raw: string | null | undefined): number {
 }
 
 export type ArtDamageInput = { damage: string; specialAttackColor: string; specialAttackDamage: string }
-export type ArtDamageResult = { base: number; power: number; special: number; total: number }
+export type ArtDamageResult = { base: number; extra: number; power: number; special: number; total: number }
 
 // アーツのダメージ ＝ アーツの数値 ＋ 攻撃するホロメンに乗っているパワーアップ ＋ （相手の色が特攻対象色なら）特攻ダメージ。
 // targetColors は、ダメージを受けるホロメンの色（「赤」「青」など。多色は、複数）
-export function calcArtDamage(art: ArtDamageInput, power: number, targetColors: string[]): ArtDamageResult {
+// extra：アーツの数値に「+」がついているとき、その場で決める追加のダメージ（入力した値）
+export function calcArtDamage(art: ArtDamageInput, power: number, targetColors: string[], extra = 0): ArtDamageResult {
   const base = parseDamage(art.damage)
   const special = art.specialAttackColor && targetColors.includes(art.specialAttackColor) ? parseDamage(art.specialAttackDamage) : 0
-  return { base, power, special, total: base + power + special }
+  const plus = Math.max(0, Math.floor(extra) || 0)
+  return { base, extra: plus, power, special, total: base + plus + power + special }
 }
+
+// アーツの数値に「+」がついている（「50+」など）：追加のダメージを、入力する
+export const isPlusDamage = (raw: string | null | undefined): boolean => /[+＋]/.test(raw ?? '')
 
 // 攻撃できるホロメンがいる、その側のゾーン（アーツのダメージを与える相手の、コラボ・センター・バック）
 export function attackTargetZones(state: PlayState, side: Side): ZoneId[] {
   return (['collab', 'center', 'back1', 'back2', 'back3', 'back4', 'back5'] as const).map((k) => zoneId(side, k)).filter((id) => isDamageableZone(state, id))
 }
+
+// アーツを使える、その側のホロメン（センター・コラボ）の枠
+export function attackerZones(state: PlayState, side: Side): ZoneId[] {
+  return (['center', 'collab'] as const).map((k) => zoneId(side, k)).filter((id) => isDamageableZone(state, id))
+}
+
+// ===== アーツに必要なエール =====
+
+// エールカード1枚の色（「多色[赤青]」のように、複数の色をもつエールは、どれかの色として使える）。属性が空のときは、カード名から探す
+export function yellColorNames(card: DeckCard): string[] {
+  let names = parseAttribute(card.attribute).colors
+  if (names.length === 0) names = card.card_name.includes(COLORLESS) ? [COLORLESS] : ATTRIBUTE_COLORS.map((c) => c.name as string).filter((n) => card.card_name.includes(n))
+  return names
+}
+
+// その枠につけているエールの、色の一覧（エール1枚ごと）
+export const unitYellColors = (cards: PlayCard[]): string[][] => unitParts(cards).yells.map((c) => yellColorNames(c.card))
+
+// アーツのエールコストを、つけているエールで払えるか。色つきのコストは、その色のエールで。無色のコストは、残りのどのエールでも
+export function canPayYellCost(cost: YellCost[], yells: string[][]): boolean {
+  const colored: string[] = []
+  let colorless = 0
+  for (const c of cost) {
+    if (c.color === COLORLESS) colorless += c.count
+    else for (let i = 0; i < c.count; i++) colored.push(c.color)
+  }
+  if (colored.length + colorless > yells.length) return false
+  const used = new Array<boolean>(yells.length).fill(false)
+  const assign = (i: number): boolean => {
+    if (i === colored.length) return true
+    for (let y = 0; y < yells.length; y++) {
+      if (used[y] || !yells[y]!.includes(colored[i]!)) continue
+      used[y] = true
+      if (assign(i + 1)) return true
+      used[y] = false
+    }
+    return false
+  }
+  return assign(0) // 残ったエールの数は、最初の枚数の確認で、無色のコストに足りている
+}
+
+export const artPayable = (art: ArtRow, cards: PlayCard[]): boolean => canPayYellCost(art.yellCost ?? [], unitYellColors(cards))
 
 // エールステップで、エールをつけられる、その側の枠（センター・コラボ・バックのホロメン）
 export function yellTargetZones(state: PlayState, side: Side): ZoneId[] {
@@ -548,11 +597,12 @@ export function yellTargetZones(state: PlayState, side: Side): ZoneId[] {
 
 // ===== ターン =====
 
-// ターンの中のステップ：draw（ドロー）→ yell（エール）→ main（メイン）→ performance（パフォーマンス）。
-// ゲーム開始時と、先攻・後攻の入れ替え・RESET のあとは main から始める（準備は、手で進めるため）。ターンチェンジのあとは、draw から始まる
-export type TurnPhase = 'draw' | 'yell' | 'main' | 'performance'
-export const TURN_PHASES: TurnPhase[] = ['draw', 'yell', 'main', 'performance']
-export const PHASE_LABEL: Record<TurnPhase, string> = { draw: 'ドロー', yell: 'エール', main: 'メイン', performance: 'パフォーマンス' }
+// ターンの中のステップ：reset（リセット）→ draw（ドロー）→ yell（エール）→ main（メイン）→ performance（パフォーマンス）。
+// ゲーム開始時と、先攻・後攻の入れ替え・RESET のあとは main から始める（準備は、手で進めるため）。
+// 対戦の準備（PrepState）が終わったときは、先攻の最初のターンを、draw から始める。ターンチェンジのあとは、reset から始まる
+export type TurnPhase = 'reset' | 'draw' | 'yell' | 'main' | 'performance'
+export const TURN_PHASES: TurnPhase[] = ['reset', 'draw', 'yell', 'main', 'performance']
+export const PHASE_LABEL: Record<TurnPhase, string> = { reset: 'リセット', draw: 'ドロー', yell: 'エール', main: 'メイン', performance: 'パフォーマンス' }
 
 export type TurnState = {
   first: Side // 先攻の側
@@ -594,7 +644,7 @@ export function clearFresh(state: PlayState, side: Side): PlayState {
 // ・ログのカードを、それぞれの側のアーカイブへ送る
 // ・相手（次のターンの側）のターン数を＋1して、その側を、ターンを進める側にする
 // ・相手のステージの、登場したターンの印を消す
-// ・次の側は、ドローステップから始まる
+// ・次の側は、リセットステップから始まる
 export function endTurn(state: PlayState, turn: TurnState, ender: Side): { state: PlayState; turn: TurnState; sent: number } {
   const other: Side = ender === 'me' ? 'opp' : 'me'
   let next = state
@@ -606,7 +656,7 @@ export function endTurn(state: PlayState, turn: TurnState, ender: Side): { state
     }
   }
   next = clearFresh(next, other)
-  return { state: next, turn: { ...turn, active: other, [other]: turn[other] + 1, phase: 'draw' }, sent }
+  return { state: next, turn: { ...turn, active: other, [other]: turn[other] + 1, phase: 'reset' }, sent }
 }
 
 // その側の、全てのカード（推しを除く）を、デッキ・エールデッキに戻して（エールはエールデッキ、ほかはデッキ）、
@@ -705,4 +755,121 @@ export function detectSupportCasts(prev: PlayState, next: PlayState): { card: De
   const had = new Set((['me', 'opp'] as const).flatMap((s) => prev[zoneId(s, 'log')].map((c) => c.uid)))
   const added = (['me', 'opp'] as const).flatMap((side) => next[zoneId(side, 'log')].filter((c) => !had.has(c.uid)).map((c) => ({ card: c.card, side, seq: c.logSeq ?? 0 })))
   return added.sort((a, b) => a.seq - b.seq).map(({ card, side }) => ({ card, side }))
+}
+
+// ===== リセットステップ =====
+
+// 枠の中身全体を、レスト（おやすみ）にする／アクティブに戻す
+export function setUnitRest(state: PlayState, zone: ZoneId, rested: boolean): PlayState {
+  if (!unitParts(state[zone]).top) return state
+  return { ...state, [zone]: state[zone].map((c) => ({ ...c, rested })) }
+}
+
+// その側のステージの、おやすみ状態のホロメンを、すべてアクティブにする。起こした枠の数を返すために、先に数える関数も用意する
+export const STAGE_ZONE_KEYS: ZoneKey[] = ['center', 'collab', 'back1', 'back2', 'back3', 'back4', 'back5']
+export const restedUnitZones = (state: PlayState, side: Side): ZoneId[] => STAGE_ZONE_KEYS.map((k) => zoneId(side, k)).filter((id) => unitParts(state[id]).top?.rested)
+export function wakeAllUnits(state: PlayState, side: Side): PlayState {
+  let next = state
+  for (const id of restedUnitZones(state, side)) next = setUnitRest(next, id, false)
+  return next
+}
+
+// バックの、空いている枠（バックとコラボは、合わせて5枚まで：slotBlocked で、置けない枠は除く）
+export const emptyBackZones = (state: PlayState, side: Side, from: ZoneId | null = null): ZoneId[] =>
+  (['back1', 'back2', 'back3', 'back4', 'back5'] as const).map((k) => zoneId(side, k)).filter((id) => state[id].length === 0 && !slotBlocked(state, id, from))
+
+// ===== デッキから、手札の横のホルダーへ =====
+// デッキの上から、n枚を、手札の横のホルダーに置く（足りなければ、置ける分だけ）。置いた枚数を返す
+export function drawToHandHolder(state: PlayState, side: Side, n: number): { state: PlayState; moved: number } {
+  const deck = state[zoneId(side, 'deck')]
+  const take = deck.slice(Math.max(0, deck.length - n)).reverse() // 上から順
+  let next = state
+  for (const c of take) next = moveCard(next, c.uid, zoneId(side, 'handHolder'))
+  return { state: next, moved: take.length }
+}
+
+// ===== ダメージを受けたことの検出（演出を出すため） =====
+export type HitEvent = { zone: ZoneId; amount: number }
+
+// 前の盤面と、いまの盤面を比べて、ダメージが増えた枠を見つける（アーツ・ダメージカウンターの、どちらも。ダメージが減ったときや、枠が変わったときは、除く）
+export function detectHits(prev: PlayState, next: PlayState): HitEvent[] {
+  const out: HitEvent[] = []
+  for (const side of ['me', 'opp'] as const) {
+    for (const k of STAGE_ZONE_KEYS) {
+      const id = zoneId(side, k)
+      if (prev[id] === next[id]) continue
+      const before = unitDamage(prev[id])
+      const after = unitDamage(next[id])
+      const sameUnit = prev[id].length > 0 && next[id].length > 0 && prev[id][0]!.uid === next[id][0]!.uid
+      if (sameUnit && after > before) out.push({ zone: id, amount: after - before })
+    }
+  }
+  return out
+}
+
+// ===== 対戦の準備（ターンが始まる前） =====
+// デッキをセット → じゃんけん → 勝った人が、先攻・後攻を決める → 先攻が準備（7枚引く・マリガン・ホロメンをセット）→ 準備完了
+// → 後攻が準備 → 準備完了 → 先攻から、ターンが始まる。保存は、ホスト向き（me ＝ ホスト）。ゲストの画面に出すときは、自分と相手を入れ替える
+export type PrepStep = 'deck' | 'janken' | 'choose' | 'first' | 'second'
+export const PREP_STEPS: PrepStep[] = ['deck', 'janken', 'choose', 'first', 'second']
+export type PrepState = {
+  step: PrepStep
+  deck: Record<Side, boolean> // デッキをセットして、準備OKにした
+  jankenWinner: Side | null // じゃんけんの勝者（先攻・後攻を決める人）
+  first: Side | null // 先攻
+  drawn: Record<Side, boolean> // 最初の手札を、引いた
+  mulligan: Record<Side, number> // マリガンした回数
+}
+
+export const initialPrep = (): PrepState => ({ step: 'deck', deck: { me: false, opp: false }, jankenWinner: null, first: null, drawn: { me: false, opp: false }, mulligan: { me: 0, opp: 0 } })
+
+const bool = (v: unknown): boolean => v === true
+const count = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.floor(v)) : 0)
+// 保存された準備の状態を読む。準備のない古い部屋・準備が終わった部屋は、null（準備なし）
+export function normalizePrep(raw: unknown): PrepState | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Partial<Record<keyof PrepState, unknown>>
+  const step = PREP_STEPS.includes(r.step as PrepStep) ? (r.step as PrepStep) : null
+  if (!step) return null
+  const pair = <T,>(v: unknown, f: (x: unknown) => T): Record<Side, T> => {
+    const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>
+    return { me: f(o.me), opp: f(o.opp) }
+  }
+  const side = (v: unknown): Side | null => (v === 'me' || v === 'opp' ? v : null)
+  return { step, deck: pair(r.deck, bool), jankenWinner: side(r.jankenWinner), first: side(r.first), drawn: pair(r.drawn, bool), mulligan: pair(r.mulligan, count) }
+}
+
+const flip = (s: Side | null): Side | null => (s === 'me' ? 'opp' : s === 'opp' ? 'me' : null)
+const swapPair = <T,>(p: Record<Side, T>): Record<Side, T> => ({ me: p.opp, opp: p.me })
+export function swapPrep(p: PrepState | null): PrepState | null {
+  return p && { ...p, deck: swapPair(p.deck), drawn: swapPair(p.drawn), mulligan: swapPair(p.mulligan), jankenWinner: flip(p.jankenWinner), first: flip(p.first) }
+}
+
+// いま準備をしている側（先攻の準備のとき：先攻／後攻の準備のとき：後攻）。それ以外は null
+export function preparingSide(p: PrepState | null): Side | null {
+  if (!p || !p.first) return null
+  return p.step === 'first' ? p.first : p.step === 'second' ? flip(p.first) : null
+}
+
+// マリガン：手札を全てデッキに戻して、シャッフルして、引き直す。引く枚数は、1回目は7枚で、2回目からは、1回ごとに1枚ずつ少なくなる
+export const HAND_SIZE = 7
+export const mulliganDrawCount = (timesAfter: number): number => Math.max(1, HAND_SIZE - Math.max(0, timesAfter - 1))
+export function mulliganHand(state: PlayState, side: Side, n: number, rnd: () => number = Math.random): PlayState {
+  return drawCards(shuffleZone(returnHandToDeck(state, side), zoneId(side, 'deck'), rnd), side, n)
+}
+
+// 準備の間に、2人の保存が重なったときの、混ぜ方。「先へ進んだ状態」を優先し、自分の側の項目は、自分のものを使う
+export function mergePrep(remote: PrepState | null, mine: PrepState | null, mySide: Side): PrepState | null {
+  if (remote === null || mine === null) return null // どちらかで、準備が終わっている
+  const other = flip(mySide)!
+  const later = PREP_STEPS.indexOf(mine.step) >= PREP_STEPS.indexOf(remote.step) ? mine : remote
+  const deck = { [mySide]: mine.deck[mySide] || remote.deck[mySide], [other]: mine.deck[other] || remote.deck[other] } as Record<Side, boolean>
+  return {
+    step: later.step === 'deck' && deck.me && deck.opp ? 'janken' : later.step, // 2人のデッキがそろったら、じゃんけんへ
+    deck,
+    jankenWinner: remote.jankenWinner ?? mine.jankenWinner,
+    first: remote.first ?? mine.first,
+    drawn: { [mySide]: mine.drawn[mySide] || remote.drawn[mySide], [other]: mine.drawn[other] || remote.drawn[other] } as Record<Side, boolean>,
+    mulligan: { [mySide]: mine.mulligan[mySide], [other]: remote.mulligan[other] } as Record<Side, number>,
+  }
 }

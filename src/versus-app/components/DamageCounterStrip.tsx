@@ -5,11 +5,11 @@ import type { GhostSpec } from '../hooks/useTouchDrag'
 import type { DragItem } from './PlayfieldBoard'
 
 // ダメージカウンターの種類（1個で、何ダメージを表すか）
-export const DAMAGE_COUNTERS = [10, 50, 100, 200] as const
+export const DAMAGE_COUNTERS = [10, 20, 40, 50, 100, 200] as const
 // パワーアップカウンターの種類（1個で、何パワー上がるか）
 export const POWER_COUNTERS = [10, 20, 50, 100] as const
 
-const DAMAGE_COLORS: Record<number, string> = { 10: '#f87171', 50: '#ef4444', 100: '#b91c1c', 200: '#7f1d1d' }
+const DAMAGE_COLORS: Record<number, string> = { 10: '#f87171', 20: '#f06464', 40: '#e84a4a', 50: '#ef4444', 100: '#b91c1c', 200: '#7f1d1d' }
 // 最大HPアップカウンターの種類（1個で、最大HPが何増えるか）
 export const HP_COUNTERS = [10, 20, 50] as const
 const HP_COLORS: Record<number, string> = { 10: '#4ade80', 20: '#22c55e', 50: '#15803d' }
@@ -22,7 +22,8 @@ type Props = {
   onDragStart: (item: DragItem) => void // マウスで、ドラッグを始めた
   onDragEnd: () => void
   onTouchDragStart: (e: ReactTouchEvent, item: DragItem, ghost: GhostSpec) => void // 指で、長押しして、ドラッグを始めた
-  onTap: (kind: CounterKind, amount: number) => void // タップ・クリック：選んでいるホロメンに、そのカウンターを乗せる
+  onTap: (kind: CounterKind, amount: number) => void // タップ・クリック：そのカウンターを選ぶ（つけ先は、そのあと、ステージのホロメンをクリックして選ぶ）
+  pending: { kind: CounterKind; amount: number } | null // いま選んでいて、つけ先を選ぶのを待っているカウンター
   onRoll: (result: number) => void // サイコロの目が出た
   hint: string
   acceptRemove: boolean // カードに乗っているカウンターをドラッグしている（ここへ落とすと外れる）
@@ -115,7 +116,7 @@ function Divider() {
 
 // ダメージカウンター・サイコロ・パワーアップカウンターの置き場。プレイフィールドとホルダーの間に、縦長に置く（狭い画面では、横長）。
 // カウンターを、ホロメンへドラッグすると乗る。ダメージが、ホロメンのHP以上になると、そのホロメンは、アーカイブへ送られる
-export function DamageCounterStrip({ compact, onDragStart, onDragEnd, onTouchDragStart, onTap, onRoll, hint, acceptRemove, removeOver, onDropRemove, jankenMine, onJanken, onLog, logOpen }: Props) {
+export function DamageCounterStrip({ compact, pending, onDragStart, onDragEnd, onTouchDragStart, onTap, onRoll, hint, acceptRemove, removeOver, onDropRemove, jankenMine, onJanken, onLog, logOpen }: Props) {
   // アイコンの大きさは、すべてそろえる。スマホ（compact）は、全部が1段に収まるよう、画面の幅に合わせて小さくする
   const rootRef = useRef<HTMLElement>(null)
   const [fit, setFit] = useState(34)
@@ -126,7 +127,7 @@ export function DamageCounterStrip({ compact, onDragStart, onDragEnd, onTouchDra
     const gap = 4
     const calc = () => {
       if (window.matchMedia('(min-width: 1280px)').matches) {
-        setFit(38) // 広い画面では、縦に並べる
+        setFit(40) // 広い画面では、縦に並べる
         return
       }
       // 幅 − 左右の余白(12) − すき間（アイコン数＋区切り線2本−1 か所） − 区切り線2本
@@ -138,10 +139,11 @@ export function DamageCounterStrip({ compact, onDragStart, onDragEnd, onTouchDra
     ro.observe(el)
     return () => ro.disconnect()
   }, [compact])
-  const size = compact ? fit : 56
+  const size = compact ? fit : 40 // PC：以前より小さくして、場所を取らないようにする
 
   const token = (kind: CounterKind, amount: number, color: string, label: string, title: string) => {
     const item: DragItem = { kind, amount }
+    const picked = pending?.kind === kind && pending.amount === amount
     return (
       <div
         key={`${kind}-${amount}`}
@@ -157,7 +159,8 @@ export function DamageCounterStrip({ compact, onDragStart, onDragEnd, onTouchDra
         onContextMenu={(e) => e.preventDefault()}
         title={title}
         className="cursor-grab select-none flex items-center justify-center text-white font-extrabold shrink-0"
-        style={tokenStyle(color, size)}
+        style={{ ...tokenStyle(color, size), ...(picked ? { outline: '3px solid #4ce0e6', outlineOffset: 2, boxShadow: '0 0 14px #4ce0e6' } : {}) }}
+        aria-pressed={picked}
       >
         {label}
       </div>
@@ -203,7 +206,7 @@ export function DamageCounterStrip({ compact, onDragStart, onDragEnd, onTouchDra
       <div className={row}>
         <div className={group}>
           {tag('DAMAGE')}
-          {DAMAGE_COUNTERS.map((n) => token('damage', n, DAMAGE_COLORS[n] ?? '#ef4444', String(n), `${n}ダメージ：ホロメンへドラッグ（選んでいるホロメンには、クリックでも与えられます）`))}
+          {DAMAGE_COUNTERS.map((n) => token('damage', n, DAMAGE_COLORS[n] ?? '#ef4444', String(n), `${n}ダメージ：クリックして、つけ先のホロメンを選ぶ（ホロメンへドラッグでも）`))}
         </div>
 
         <Divider />
@@ -216,7 +219,7 @@ export function DamageCounterStrip({ compact, onDragStart, onDragEnd, onTouchDra
 
         <div className={group}>
           {tag('POWER')}
-          {POWER_COUNTERS.map((n) => token('power', n, POWER_COLORS[n] ?? '#f59e0b', `+${n}`, `パワーアップ+${n}：ホロメンへドラッグ（選んでいるホロメンには、クリックでも乗ります）`))}
+          {POWER_COUNTERS.map((n) => token('power', n, POWER_COLORS[n] ?? '#f59e0b', `+${n}`, `パワーアップ+${n}：クリックして、つけ先のホロメンを選ぶ（ホロメンへドラッグでも）`))}
         </div>
       </div>
 
@@ -224,7 +227,7 @@ export function DamageCounterStrip({ compact, onDragStart, onDragEnd, onTouchDra
       <div className={row}>
         <div className={group}>
           {tag('MAXHP')}
-          {HP_COUNTERS.map((n) => token('hp', n, HP_COLORS[n] ?? '#22c55e', `+${n}`, `最大HP+${n}：ホロメンへドラッグ（選んでいるホロメンには、クリックでも増えます）`))}
+          {HP_COUNTERS.map((n) => token('hp', n, HP_COLORS[n] ?? '#22c55e', `+${n}`, `最大HP+${n}：クリックして、つけ先のホロメンを選ぶ（ホロメンへドラッグでも）`))}
         </div>
 
         <Divider />

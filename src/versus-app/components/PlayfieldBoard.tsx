@@ -17,7 +17,7 @@ export type DragItem = NonNullable<PlayDrag>
 export type PickState = { zones: ZoneId[]; color: string }
 
 // アニメーション。shuffle: そのゾーンのカードをシャッフルする動き／down: ダメージで倒されたホロメンが、アーカイブへ飛んでいく動き
-export type PlayFxInput = { kind: 'shuffle'; zone: ZoneId } | { kind: 'down' | 'fly'; from: ZoneId; to: ZoneId; card: DeckCard } | { kind: 'bloom'; zone: ZoneId; stage: BloomStage; label: string } // bloom：ブルームした枠の、演出（相手の画面へは送らない。それぞれの画面で、盤面の変化から出す） // fly：カードが、1枚、別のゾーンへ飛んでいく（ホロパワーのアーカイブなど）
+export type PlayFxInput = { kind: 'shuffle'; zone: ZoneId } | { kind: 'down' | 'fly'; from: ZoneId; to: ZoneId; card: DeckCard } | { kind: 'bloom'; zone: ZoneId; stage: BloomStage; label: string } | { kind: 'attack'; from: ZoneId; to: ZoneId; amount: number } | { kind: 'hit'; zone: ZoneId; amount: number } // attack：アーツの攻撃（矢印とダメージが、攻撃する枠から、相手の枠へ飛ぶ。相手の画面にも送る）／hit：ダメージを受けた枠の、演出（盤面の変化から、それぞれの画面で出す）／ bloom：ブルームした枠の、演出（相手の画面へは送らない。それぞれの画面で、盤面の変化から出す） // fly：カードが、1枚、別のゾーンへ飛んでいく（ホロパワーのアーカイブなど）
 export type PlayFx = PlayFxInput & { id: number }
 
 const FX_CSS = `
@@ -37,6 +37,12 @@ const FX_CSS = `
 @keyframes pf-bloom-spark{0%{transform:translate(-50%,-50%) rotate(var(--a)) translateY(0) scale(.4);opacity:0}15%{opacity:1}100%{transform:translate(-50%,-50%) rotate(var(--a)) translateY(calc(var(--r) * -1)) scale(1);opacity:0}}
 @keyframes pf-bloom-text{0%{transform:scale(.3);opacity:0}18%{transform:scale(1.2);opacity:1}62%{transform:scale(1);opacity:1}100%{transform:translateY(-26px) scale(1);opacity:0}}
 @keyframes pf-bloom-shine{0%{transform:translateX(-130%) skewX(-20deg);opacity:0}25%{opacity:.9}100%{transform:translateX(230%) skewX(-20deg);opacity:0}}
+@keyframes pf-atk-fly{0%{transform:translate(0,0) scale(.5);opacity:0}14%{opacity:1}82%{opacity:1}100%{transform:translate(var(--dx),var(--dy)) scale(1.2);opacity:0}}
+@keyframes pf-atk-trail{0%{opacity:0;clip-path:inset(0 100% 0 0)}20%{opacity:.95}100%{opacity:0;clip-path:inset(0 0 0 0)}}
+@keyframes pf-hit-flash{0%{opacity:0}10%{opacity:.8}100%{opacity:0}}
+@keyframes pf-hit-shake{0%,100%{transform:translate(0,0)}15%{transform:translate(-14px,6px)}30%{transform:translate(12px,-6px)}45%{transform:translate(-10px,4px)}60%{transform:translate(8px,-4px)}75%{transform:translate(-4px,2px)}}
+@keyframes pf-hit-num{0%{transform:translateY(24px) scale(.4);opacity:0}18%{transform:translateY(0) scale(1.25);opacity:1}60%{transform:translateY(-8px) scale(1);opacity:1}100%{transform:translateY(-70px) scale(1);opacity:0}}
+@keyframes pf-hit-ring{0%{transform:scale(.4);opacity:.95}100%{transform:scale(1.35);opacity:0}}
 @keyframes pf-down-flash{0%{opacity:0}12%{opacity:.75}100%{opacity:0}}
 @keyframes pf-down-text{0%{transform:scale(.4);opacity:0}15%{transform:scale(1.25);opacity:1}55%{transform:scale(1);opacity:1}100%{transform:translateY(-24px) scale(1);opacity:0}}
 @media (prefers-reduced-motion: reduce){.pf-fx{display:none!important}}
@@ -123,10 +129,15 @@ export type BoardProps = {
   onInspect: (card: DeckCard) => void // 相手が公開したカードを、詳しく見る
   onHandReturnAll: (side: Side) => void // 手札の左：手札を、全てデッキに戻す
   onHandSort: (side: Side) => void // 手札の左：手札を、並び替える
-  concealSide?: Side // 対戦中：この側の、手札などの中身は、伏せて見せない（相手の側）
+  concealSide?: Side | 'both' // 対戦中：この側の、手札などの中身は、伏せて見せない（相手の側）。'both'：両方（管理画面の観戦で、手札を伏せるとき）
+  hideStage?: Side // 対戦の準備中：この側の、ステージ（センター・コラボ・バック）のカードは、裏向きに隠して見せない（セットしたホロメンを、相手に見せない）
+  lockTurn?: boolean // 対戦の準備中：ターンのボタンを、押せなくする
+  readOnly?: boolean // 見るだけ（管理画面の観戦）。ターンのボタンも、手札の操作ボタンも、押せない
   pick: PickState | null // 枠を選ばせているとき
   onPickZone: (zone: ZoneId) => void // 光っている枠を、クリック（タップ）したとき
 }
+
+const concealsSide = (p: Pick<BoardProps, 'concealSide'>, side: Side): boolean => p.concealSide === 'both' || p.concealSide === side
 
 // ---- カードの裏面 ----
 // ライフ：クリスタルのような、ハートの宝石
@@ -430,7 +441,7 @@ function ZoneView({ def, side, p }: { def: ZoneDef; side: Side; p: BoardProps })
 
   // ゾーンの中身を開く。デッキは、中身ではなく、近くにメニュー（シャッフル・ドローなど）を出す
   // 対戦中、相手の手札・デッキ・エールデッキ・ライフ・パワーの中身は、見られない（アーカイブ・ステージは、見られる）
-  const concealed = p.concealSide === side
+  const concealed = concealsSide(p, side)
   const secretPile = concealed && (def.key === 'deck' || def.key === 'yellDeck' || def.key === 'life' || def.key === 'power')
   const openViewer = () => {
     if (!secretPile) p.onOpenZone(id)
@@ -463,6 +474,10 @@ function ZoneView({ def, side, p }: { def: ZoneDef; side: Side; p: BoardProps })
       // 枠の中身は、ひとまとまり（ユニット）：表に見えるホロメン、ブルームの回数、つけているサポート、つけているエール
       const parts = unitParts(cards)
       const face = parts.top ?? top
+      // 対戦の準備中：相手がセットしたホロメンは、裏向きの1枚だけを見せる（何のカードかは、わからない）
+      if (p.hideStage === side && def.key !== 'oshi') {
+        return <CardView pc={{ ...face, faceDown: true, rested: false }} w={w - 6} h={h - 6} selected={false} draggable={false} fit={{ w: w - 6, h: h - 6 }} p={p} style={{ position: 'absolute', left: 0, top: 0 }} />
+      }
       const unitSelected = p.selectedUid !== null && cards.some((c) => c.uid === p.selectedUid)
       const blooms = Math.max(0, parts.holomen.length - 1)
       // 数値は、合計だけを表示する（HP：いちばん上のホロメンのHPから、ダメージを引いた残り／D：ダメージ／P：パワーアップ）。推しは、対象外
@@ -724,6 +739,7 @@ function ZoneView({ def, side, p }: { def: ZoneDef; side: Side; p: BoardProps })
   const downDef = downTo ? ZONE_BY_KEY.get(downTo.key) : undefined
   const flyFxs = p.fx.filter((f) => f.kind === 'fly' && f.from === id)
   const bloomFx = p.fx.find((f) => f.kind === 'bloom' && f.zone === id)
+  const hitFx = p.fx.find((f) => f.kind === 'hit' && f.zone === id)
   return (
     <>
       <div
@@ -771,6 +787,7 @@ function ZoneView({ def, side, p }: { def: ZoneDef; side: Side; p: BoardProps })
           width: def.w,
           height: def.h,
           transition: def.key === 'hand' || def.key === 'handHolder' ? 'left 0.2s ease, width 0.2s ease, filter 0.3s ease' : 'filter 0.3s ease',
+          animation: hitFx ? 'pf-hit-shake 0.45s ease-out' : undefined, // ダメージを受けた枠は、揺れる
           // ターンではないプレイヤーの、デッキ・エールデッキ・ホルダーは、灰色にする
           filter: grayedOut ? 'grayscale(1) brightness(0.72)' : undefined,
           boxSizing: 'border-box',
@@ -882,6 +899,17 @@ function ZoneView({ def, side, p }: { def: ZoneDef; side: Side; p: BoardProps })
             </div>
           )
         })}
+        {/* ダメージを受けたときの演出：赤く光って、衝撃の輪が広がり、ダメージの数が浮かび上がる */}
+        {hitFx && hitFx.kind === 'hit' && (
+          <div key={hitFx.id} className="pf-fx" style={{ position: 'absolute', inset: 0, zIndex: 43, pointerEvents: 'none' }}>
+            <div style={{ position: 'absolute', inset: 0, borderRadius: 12, background: '#ef4444', mixBlendMode: 'multiply', animation: 'pf-hit-flash 0.7s ease-out forwards' }} />
+            <div style={{ position: 'absolute', inset: 0, borderRadius: 12, background: 'radial-gradient(circle, rgba(255,255,255,0.9), rgba(255,80,60,0.5) 45%, rgba(0,0,0,0) 70%)', animation: 'pf-hit-flash 0.35s ease-out forwards' }} />
+            <div style={{ position: 'absolute', inset: 0, borderRadius: 14, border: '8px solid #ff5a3c', boxShadow: '0 0 28px #ff5a3c', opacity: 0, animation: 'pf-hit-ring 0.6s ease-out forwards' }} />
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transform: side === 'opp' ? 'rotate(180deg)' : undefined }}>
+              <span style={{ fontSize: Math.min(92, def.w * 0.34), fontWeight: 900, color: '#fff', WebkitTextStroke: '3px #b91c1c', textShadow: '0 0 14px #ef4444, 0 4px 8px rgba(0,0,0,0.9)', animation: 'pf-hit-num 1s ease-out forwards', opacity: 0 }}>-{hitFx.amount}</span>
+            </div>
+          </div>
+        )}
         {/* ブルームのアニメーション：進化レベルの色で光って、輪とキラキラが広がり、カードの上を光が走る */}
         {bloomFx && bloomFx.kind === 'bloom' && (() => {
           const c = BLOOM_STYLE[bloomFx.stage]
@@ -1084,7 +1112,7 @@ function Half({ side, p, style }: { side: Side; p: BoardProps; style: CSSPropert
         return <ZoneView key={def.key} def={d} side={side} p={p} />
       })}
       {/* 手札の左：全て戻す・並び替えのボタン（対戦中、相手の側には出さない） */}
-      {p.concealSide !== side && (
+      {!concealsSide(p, side) && !p.readOnly && (
         <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', left: HAND_BTN_X, top: handDef.y, width: HAND_BTN_W, height: handDef.h, display: 'flex', flexDirection: 'column', gap: 10, zIndex: 15 }}>
           <HandActionButton label="全て戻す" title="手札のカードを、全てデッキに戻します（シャッフルはしません）" disabled={handCount === 0} onClick={() => p.onHandReturnAll(side)} />
           <HandActionButton label="並び替え" title="手札を、ホロメン（2nd→1st→Debut）→サポート→その他の順に並べ替えます" disabled={handCount < 2} onClick={() => p.onHandSort(side)} />
@@ -1184,6 +1212,46 @@ function LogFrame({ p }: { p: BoardProps }) {
   )
 }
 
+// アーツの攻撃の演出：攻撃する枠から、ダメージを受ける枠へ、矢印とダメージの数が飛ぶ。盤面の上に、全体を覆うように出す
+function zoneCenter(id: ZoneId): { x: number; y: number } | null {
+  const parsed = parseZone(id)
+  const def = parsed ? ZONE_BY_KEY.get(parsed.key) : undefined
+  if (!parsed || !def) return null
+  const cx = def.x + def.w / 2
+  const cy = def.y + def.h / 2
+  // 自分の側：そのまま／相手の側：半分の盤面ごと、180度回転しているので、点対称の位置になる
+  return parsed.side === 'me' ? { x: cx, y: HALF_H + HALF_GAP + cy } : { x: HALF_W - cx, y: HALF_H - cy }
+}
+
+function AttackLayer({ fx }: { fx: PlayFx[] }) {
+  const attacks = fx.filter((f): f is PlayFx & { kind: 'attack' } => f.kind === 'attack')
+  if (attacks.length === 0) return null
+  return (
+    <div aria-hidden="true" style={{ position: 'absolute', left: 0, top: 0, width: HALF_W, height: MAT_H, pointerEvents: 'none', zIndex: 60 }}>
+      {attacks.map((a) => {
+        const from = zoneCenter(a.from)
+        const to = zoneCenter(a.to)
+        if (!from || !to) return null
+        const dx = to.x - from.x
+        const dy = to.y - from.y
+        const len = Math.hypot(dx, dy)
+        const ang = (Math.atan2(dy, dx) * 180) / Math.PI
+        return (
+          <div key={a.id} className="pf-fx" style={{ position: 'absolute', left: from.x, top: from.y, width: 0, height: 0, '--dx': `${dx}px`, '--dy': `${dy}px` } as CSSProperties}>
+            <div style={{ position: 'absolute', left: 0, top: -9, width: len, height: 18, transformOrigin: '0 50%', transform: `rotate(${ang}deg)`, borderRadius: 9, background: 'linear-gradient(90deg, rgba(255,90,60,0), rgba(255,170,60,0.95))', opacity: 0, animation: 'pf-atk-trail 0.62s ease-out forwards' }} />
+            <div style={{ position: 'absolute', left: 0, top: 0, opacity: 0, animation: 'pf-atk-fly 0.55s cubic-bezier(.5,0,.8,.45) forwards' }}>
+              <svg width="230" height="116" viewBox="0 0 160 80" style={{ position: 'absolute', left: -115, top: -58, transform: `rotate(${ang}deg)`, filter: 'drop-shadow(0 0 14px #ff5a3c)' }}>
+                <path d="M2 26 H100 V4 L158 40 L100 76 V54 H2 Z" fill="#ff5a3c" stroke="#fff" strokeWidth="5" strokeLinejoin="round" />
+              </svg>
+              <span style={{ position: 'absolute', left: 0, top: -96, transform: 'translateX(-50%)', fontSize: 78, fontWeight: 900, color: '#fff', whiteSpace: 'nowrap', WebkitTextStroke: '3px #b91c1c', textShadow: '0 0 16px #ff5a3c, 0 4px 8px rgba(0,0,0,0.9)' }}>+{a.amount}</span>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ターン表示：先攻・後攻、ターン数、いまのステップ、ステップを進めるボタン。ログの枠の両側（自分は右、相手は左で、反対向き）。幅は、ライフの枠と同じ
 // ボタンは、ステップに合わせて変わる：メインステップ → 「メインステップ終了」／パフォーマンスステップ → 「パフォーマンスステップ終了」（押すと、ターンチェンジ）。
 // ドロー・エールのステップは、画面の案内に沿って進める（ボタンは、押せない）
@@ -1191,11 +1259,11 @@ function TurnPanel({ side, p }: { side: Side; p: BoardProps }) {
   const active = p.turn.active === side
   const turnNo = side === 'me' ? p.turn.me : p.turn.opp
   const isFirst = p.turn.first === side
-  const locked = p.concealSide === side // 対戦中、相手の側のボタンは、押せない（相手が、自分の画面で押す）
+  const locked = !!p.readOnly || concealsSide(p, side) // 対戦中、相手の側のボタンは、押せない（相手が、自分の画面で押す）
   const phase = p.turn.phase
-  const canPress = active && !locked && (phase === 'main' || phase === 'performance')
-  const lines: [string, string] = !active ? ['待機中', ''] : phase === 'draw' ? ['ドロー', 'ステップ中'] : phase === 'yell' ? ['エール', 'ステップ中'] : phase === 'main' ? ['メインステップ', '終了'] : ['パフォーマンス', 'ステップ終了']
-  const title = locked ? '相手のボタンは、押せません（相手が、自分の画面で押します）' : !active ? '相手のターンです' : phase === 'draw' ? 'ドローステップ：デッキをクリックして、1枚引きます' : phase === 'yell' ? 'エールステップ：エールをつけるホロメンを選びます' : phase === 'main' ? 'メインステップを終えて、パフォーマンスステップに進みます' : 'パフォーマンスステップを終えて、ターンチェンジします（SUPPORT のカードをアーカイブへ送り、相手のターン数を+1して、相手のステージの警告マークを消します）'
+  const canPress = active && !locked && !p.lockTurn && (phase === 'reset' || phase === 'main' || phase === 'performance')
+  const lines: [string, string] = p.lockTurn ? ['準備中', ''] : !active ? ['待機中', ''] : phase === 'reset' ? ['リセット', 'ステップ終了'] : phase === 'draw' ? ['ドロー', 'ステップ中'] : phase === 'yell' ? ['エール', 'ステップ中'] : phase === 'main' ? ['メインステップ', '終了'] : ['パフォーマンス', 'ステップ終了']
+  const title = locked ? '相手のボタンは、押せません（相手が、自分の画面で押します）' : p.lockTurn ? '対戦の準備中です' : !active ? '相手のターンです' : phase === 'reset' ? 'リセットステップを終えて、ドローステップに進みます' : phase === 'draw' ? 'ドローステップ：デッキをクリックして、1枚引きます' : phase === 'yell' ? 'エールステップ：エールをつけるホロメンを選びます' : phase === 'main' ? 'メインステップを終えて、パフォーマンスステップに進みます' : 'パフォーマンスステップを終えて、ターンチェンジします（SUPPORT のカードをアーカイブへ送り、相手のターン数を+1して、相手のステージの警告マークを消します）'
   return (
     <div
       onClick={(e) => e.stopPropagation()}
@@ -1292,6 +1360,7 @@ function PlayfieldBoardImpl(props: BoardProps) {
           <TurnPanel side="opp" p={props} />
           <TurnPanel side="me" p={props} />
           <LogFrame p={props} />
+          <AttackLayer fx={props.fx} />
         </div>
       </div>
     </div>
@@ -1300,6 +1369,6 @@ function PlayfieldBoardImpl(props: BoardProps) {
 
 // 盤面に関係するデータが変わったときだけ、描き直す（メッセージ・検索・プレビューなど、盤面と関係ない変更では、描き直さない）。
 // コールバック（on〜）は、比べない。呼ぶ側（PlayfieldPanel）が、常に最新の処理を呼ぶ、変わらない関数を渡す
-const BOARD_DATA_KEYS = ['state', 'selectedUid', 'drag', 'overZone', 'overPos', 'hpOf', 'touchMode', 'moveMode', 'maxHeight', 'fx', 'oshiSkills', 'skillUsed', 'turn', 'concealSide', 'pick'] as const satisfies readonly (keyof BoardProps)[]
+const BOARD_DATA_KEYS = ['state', 'selectedUid', 'drag', 'overZone', 'overPos', 'hpOf', 'touchMode', 'moveMode', 'maxHeight', 'fx', 'oshiSkills', 'skillUsed', 'turn', 'concealSide', 'readOnly', 'hideStage', 'lockTurn', 'pick'] as const satisfies readonly (keyof BoardProps)[]
 const sameBoardData = (a: BoardProps, b: BoardProps): boolean => BOARD_DATA_KEYS.every((k) => a[k] === b[k])
 export const PlayfieldBoard = memo(PlayfieldBoardImpl, sameBoardData)

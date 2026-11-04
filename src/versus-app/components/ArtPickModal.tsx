@@ -2,18 +2,21 @@
 import { useLayoutEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { YELL_COLOR_HEX, type ArtRow } from '../types/artsSkills'
-import { parseDamage, type ZoneId } from '../utils/playfield'
+import { isPlusDamage, parseDamage, type ZoneId } from '../utils/playfield'
 import type { DeckCard } from '../utils/deckImage'
 
-// パフォーマンスステップ：センターのホロメンの、どのアーツを使うかを選ぶメニュー。
+// パフォーマンスステップ：センター・コラボのホロメンの、どのアーツを使うかを選ぶメニュー。
 // 選んだカード（anchorZone の枠）の、すぐ上に出す（上に余白が足りないときは、下）。外側をクリックすると、閉じる。
+// ・必要なエールが足りないアーツは、選べない（暗く表示する）
+// ・アーツのダメージに「+」がついているもの（50+ など）は、追加するダメージを、入力できる
 // 選んだら、盤面で、ダメージを与える相手（コラボ・センター・バック）を選ぶ
 const MENU_MAX_W = 380
 const GAP = 10
 
-export function ArtPickModal({ anchorZone, card, arts, loading, error, power, onPick, onClose }: { anchorZone: ZoneId; card: DeckCard; arts: ArtRow[]; loading: boolean; error: string; power: number; onPick: (art: ArtRow) => void; onClose: () => void }) {
+export function ArtPickModal({ anchorZone, card, arts, loading, error, power, payable, onPick, onClose }: { anchorZone: ZoneId; card: DeckCard; arts: ArtRow[]; loading: boolean; error: string; power: number; payable: (art: ArtRow) => boolean; onPick: (art: ArtRow, extra: number) => void; onClose: () => void }) {
   const [rect, setRect] = useState<DOMRect | null>(null)
   const [vp, setVp] = useState({ w: window.innerWidth, h: window.innerHeight })
+  const [extra, setExtra] = useState<Record<number, string>>({}) // 「+」のアーツに、追加するダメージ（入力中の文字）
 
   // カードの、画面上の位置（ズームやスクロールで動くので、そのたびに測り直す）
   useLayoutEffect(() => {
@@ -41,6 +44,9 @@ export function ArtPickModal({ anchorZone, card, arts, loading, error, power, on
   const pos = !rect ? { top: 16 } : above ? { bottom: vp.h - rect.top + GAP } : { top: rect.bottom + GAP }
   const caretLeft = Math.max(18, Math.min(cx - left, w - 18))
 
+  const extraOf = (i: number): number => Math.max(0, Math.floor(Number(extra[i] ?? '0')) || 0)
+  const bump = (i: number, d: number) => setExtra((m) => ({ ...m, [i]: String(extraOf(i) + d) }))
+
   return createPortal(
     <>
       <div className="fixed inset-0 z-[89]" onClick={onClose} />
@@ -63,9 +69,11 @@ export function ArtPickModal({ anchorZone, card, arts, loading, error, power, on
           {!loading && !error && arts.length === 0 && <p className="text-sm text-[#ffd76a]">このカードには、アーツが登録されていません</p>}
 
           <ul className="flex flex-col gap-1.5">
-            {arts.map((a, i) => (
-              <li key={i}>
-                <button type="button" onClick={() => onPick(a)} className="w-full rounded-lg border-2 border-[#e88c4d]/50 bg-[#e88c4d]/[0.07] p-2 text-left hover:border-[#ffd76a] focus-visible:border-[#ffd76a] focus-visible:outline-none">
+            {arts.map((a, i) => {
+              const ok = payable(a)
+              const plus = isPlusDamage(a.damage)
+              return (
+                <li key={i} className="rounded-lg border-2 p-2" style={{ borderColor: ok ? 'rgba(232,140,77,0.5)' : 'rgba(120,130,135,0.4)', background: ok ? 'rgba(232,140,77,0.07)' : 'rgba(120,130,135,0.06)', opacity: ok ? 1 : 0.55 }}>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="inline-flex items-center gap-1">
                       {(a.yellCost ?? []).map((c, j) => (
@@ -88,9 +96,25 @@ export function ArtPickModal({ anchorZone, card, arts, loading, error, power, on
                     </div>
                   )}
                   {a.effectText && <p className="mt-1 whitespace-pre-wrap text-[11px] leading-snug text-[#d7eef2]">{a.effectText}</p>}
-                </button>
-              </li>
-            ))}
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                    {plus && ok && (
+                      <label className="flex items-center gap-1 text-xs text-[#ffe9a8]">
+                        追加ダメージ ＋
+                        <input type="number" inputMode="numeric" min={0} step={10} className="field !w-20 !py-1 text-right" value={extra[i] ?? ''} placeholder="0" onChange={(e) => setExtra((m) => ({ ...m, [i]: e.target.value }))} aria-label={`${a.name}の追加ダメージ`} />
+                        {[10, 20, 50].map((d) => (
+                          <button key={d} type="button" className="btn-secondary !px-1.5 !py-0.5 text-[11px]" onClick={() => bump(i, d)}>
+                            +{d}
+                          </button>
+                        ))}
+                      </label>
+                    )}
+                    <button type="button" disabled={!ok} className="btn-primary ml-auto !px-3 !py-1 disabled:cursor-not-allowed" onClick={() => onPick(a, plus ? extraOf(i) : 0)}>
+                      {ok ? '使う' : 'エール不足'}
+                    </button>
+                  </div>
+                </li>
+              )
+            })}
           </ul>
         </div>
       </div>

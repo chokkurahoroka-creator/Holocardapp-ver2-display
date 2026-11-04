@@ -1,6 +1,6 @@
 // このファイルは、管理画面（horoka-admin）から、同期したコピーです。直接は、直さないでください（node scripts/sync-versus.mjs で、上書きされます）。直すときは、管理画面側のファイルを直して、同期してください。
 import type { DeckCard } from '../utils/deckImage'
-import { emptyState, initialTurn, normalizeTurn, swapTurn, type PlayCard, type PlayState, type TurnState, type ZoneId } from '../utils/playfield'
+import { emptyState, initialPrep, initialTurn, mergePrep, normalizePrep, normalizeTurn, swapPrep, swapTurn, type PlayCard, type PlayState, type PrepState, type Side, type TurnState, type ZoneId } from '../utils/playfield'
 
 // ===== 対戦ルームで、盤面をやり取りするための形 =====
 // ・盤面は「ホスト側＝me／ゲスト側＝opp」の向きで、ルームに保存する（正本）。ゲストは、画面に出すときだけ、自分と相手を入れ替える
@@ -14,11 +14,12 @@ export type WireDoc = {
   z: Partial<Record<ZoneId, WireCard[]>>
   su: Record<string, boolean> // 推しスキルを使ったか（キーは、ホスト向きの me:oshi など）
   tn?: TurnState // ターンの状態（ホスト向き）
+  pp?: PrepState | null // 対戦の準備の状態（ホスト向き）。無い・null は、準備なし（古い部屋・準備が終わった部屋）
 }
 
-export const emptyWire = (): WireDoc => ({ v: 1, z: {}, su: {}, tn: initialTurn() })
+export const emptyWire = (): WireDoc => ({ v: 1, z: {}, su: {}, tn: initialTurn(), pp: initialPrep() }) // 新しい部屋は、準備から始まる
 
-export function toWire(state: PlayState, skillUsed: Record<string, boolean>, turn: TurnState = initialTurn()): WireDoc {
+export function toWire(state: PlayState, skillUsed: Record<string, boolean>, turn: TurnState = initialTurn(), prep: PrepState | null = null): WireDoc {
   const z: WireDoc['z'] = {}
   for (const id of Object.keys(state) as ZoneId[]) {
     if (id === 'holder' || state[id].length === 0) continue
@@ -26,7 +27,7 @@ export function toWire(state: PlayState, skillUsed: Record<string, boolean>, tur
   }
   const su: Record<string, boolean> = {}
   for (const [k, v] of Object.entries(skillUsed)) if (v) su[k] = true
-  return { v: 1, z, su, tn: turn }
+  return { v: 1, z, su, tn: turn, pp: prep }
 }
 
 // 盤面に出ているカードのID（不足している情報を、取りに行くため）
@@ -72,10 +73,36 @@ export function turnFromWire(doc: WireDoc, guest: boolean): TurnState {
   return guest ? swapTurn(t) : t
 }
 
+// 準備の状態（正本の向き）。ゲストの画面に出すときは、自分と相手を入れ替える
+export function prepFromWire(doc: WireDoc, guest: boolean): PrepState | null {
+  const p = normalizePrep(doc.pp)
+  return guest ? swapPrep(p) : p
+}
+
 export const swapZoneId = (id: ZoneId): ZoneId => swapId(id) as ZoneId
 
+// 準備の間に、2人の保存が重なったとき：相手の保存（remote）の上に、自分の側のゾーンだけを重ねて、混ぜる（どちらも、正本の向き）。
+// 準備の間は、2人とも、自分の側のカードだけを動かすので、混ぜても、操作は、失われない
+export function mergeDocs(remote: WireDoc, mine: WireDoc, mySide: Side): WireDoc {
+  const prefix = mySide === 'me' ? 'me:' : 'opp:'
+  const z: WireDoc['z'] = {}
+  for (const id of new Set([...Object.keys(remote.z), ...Object.keys(mine.z)]) as Set<ZoneId>) {
+    const src = id.startsWith(prefix) ? mine.z[id] : remote.z[id]
+    if (src && src.length > 0) z[id] = src
+  }
+  const su: Record<string, boolean> = {}
+  for (const [k, v] of Object.entries({ ...remote.su, ...mine.su })) {
+    const own = k.startsWith(prefix)
+    if (own ? mine.su[k] : remote.su[k]) su[k] = v
+  }
+  const pp = mergePrep(normalizePrep(remote.pp), normalizePrep(mine.pp), mySide)
+  // 準備が終わった側（pp が null）の、ターンの状態を使う
+  const tn = normalizePrep(mine.pp) === null || normalizePrep(remote.pp) === null ? (normalizePrep(mine.pp) === null ? mine.tn : remote.tn) : remote.tn
+  return { v: 1, z, su, tn, pp }
+}
+
 // ===== 相手の画面へ送る出来事（サイコロ・シャッフル・ダウンの演出） =====
-export type RemoteEventInput = { kind: 'dice'; n: number } | { kind: 'janken'; hand: number } | { kind: 'fx'; fx: { kind: 'shuffle'; zone: ZoneId } | { kind: 'down' | 'fly'; from: ZoneId; to: ZoneId; card: DeckCard } }
+export type RemoteEventInput = { kind: 'dice'; n: number } | { kind: 'janken'; hand: number } | { kind: 'fx'; fx: { kind: 'shuffle'; zone: ZoneId } | { kind: 'down' | 'fly'; from: ZoneId; to: ZoneId; card: DeckCard } | { kind: 'attack'; from: ZoneId; to: ZoneId; amount: number } }
 export type RemoteEvent = RemoteEventInput & { id: number }
 
 // 自分の画面に出ている状態を、ルームへ保存するときの形、その逆
@@ -83,7 +110,8 @@ export type VersusSync = {
   state: PlayState // 画面に出す向き（自分が下側）
   skillUsed: Record<string, boolean>
   turn: TurnState
-  onChange: (next: PlayState, skills?: Record<string, boolean>, turn?: TurnState) => void
+  prep: PrepState | null // 対戦の準備の状態（画面に出す向き）。null は、準備なし（準備が終わった）
+  onChange: (next: PlayState, skills?: Record<string, boolean>, turn?: TurnState, prep?: PrepState | null) => void // prep：渡さないと、そのまま
   onEmit: (ev: RemoteEventInput) => void
   lastEvent: RemoteEvent | null // 相手から届いた、最新の出来事（zone は、受け取った側の向きに直してある）
   roomCode: string

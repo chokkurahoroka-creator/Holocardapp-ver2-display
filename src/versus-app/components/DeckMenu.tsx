@@ -3,7 +3,7 @@ import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import type { Side } from '../utils/playfield'
 
-export type DeckMenuAction = 'shuffle' | 'draw1' | 'draw3' | 'draw5' | 'draw7' | 'returnAll' | 'returnYells' | 'view'
+export type DeckMenuAction = 'shuffle' | 'holder1' | 'holder3' | 'holder4' | 'holder5' | 'draw1' | 'draw3' | 'draw5' | 'draw7' | 'returnAll' | 'returnYells' | 'view'
 
 type Props = {
   anchor: DOMRect // デッキの、画面上の位置
@@ -54,9 +54,16 @@ export function DeckMenu({ anchor, title, side, kind, deckCount, returnCount, on
     { action: 'draw5', label: '5枚引く' },
     { action: 'draw7', label: '7枚引く' },
   ]
+  // デッキの上から、n枚を、手札の横のホルダーに置く
+  const holders: { action: DeckMenuAction; label: string }[] = [
+    { action: 'holder1', label: '1枚ホルダー' },
+    { action: 'holder3', label: '3枚ホルダー' },
+    { action: 'holder4', label: '4枚ホルダー' },
+    { action: 'holder5', label: '5枚ホルダー' },
+  ]
 
   // デッキの左側に出す。入らなければ右側。画面の外に出ないよう、位置を整える
-  const height = kind === 'yellDeck' ? 46 + ITEM_H * 3 + 24 : 46 + ITEM_H * 5 + ITEM_H + 24
+  const height = kind === 'yellDeck' ? 46 + ITEM_H * 3 + 24 : 46 + ITEM_H * 7 + ITEM_H + 24
   let left = anchor.left - 10 - MENU_W
   if (left < 8) left = anchor.right + 10
   left = Math.max(8, Math.min(left, window.innerWidth - MENU_W - 8))
@@ -80,6 +87,23 @@ export function DeckMenu({ anchor, title, side, kind, deckCount, returnCount, on
         </span>
       </div>
       <div className="py-1">
+        {kind === 'deck' && (
+          <div className="grid grid-cols-2 border-b border-[#143844] mb-1" title="デッキの上から、n枚を、手札の横のホルダーに置きます">
+            {holders.map((d, i) => (
+              <button
+                key={d.action}
+                type="button"
+                role="menuitem"
+                disabled={deckCount < 1}
+                onClick={() => onAction(d.action)}
+                className={`text-center ${itemClass} ${i % 2 === 0 ? 'border-r border-[#143844]' : ''} ${i < 2 ? 'border-b border-[#143844]' : ''}`}
+                style={{ minHeight: ITEM_H }}
+              >
+                {d.label}
+              </button>
+            ))}
+          </div>
+        )}
         <button type="button" role="menuitem" disabled={deckCount < 2} onClick={() => onAction('shuffle')} className={`w-full text-left px-4 ${itemClass}`} style={{ minHeight: ITEM_H }}>
           シャッフル
         </button>

@@ -25,8 +25,20 @@ import {
   archiveSplit,
   attachYellFromDeck,
   compactBacks,
+  HAND_SIZE,
+  artPayable,
   attackTargetZones,
   calcArtDamage,
+  drawToHandHolder,
+  detectHits,
+  emptyBackZones,
+  mulliganDrawCount,
+  mulliganHand,
+  preparingSide,
+  restedUnitZones,
+  setUnitRest,
+  wakeAllUnits,
+  type PrepState,
   detectBlooms,
   detectSupportCasts,
   endTurn,
@@ -86,6 +98,8 @@ import { PlayLogPanel } from './PlayLogPanel'
 import { VictoryModal } from './VictoryModal'
 import { TurnChangeBanner } from './TurnChangeBanner'
 import { DrawStepOverlay } from './DrawStepOverlay'
+import { PrepFlow } from './PrepFlow'
+import { ZoneActionMenu } from './ZoneActionMenu'
 import { ArtPickModal } from './ArtPickModal'
 import { SupportCastOverlay, type SupportCast } from './SupportCastOverlay'
 import { parseAttribute } from '../utils/attribute'
@@ -530,7 +544,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
   const moveTargets = versus ? MOVE_TARGETS.filter((t) => t.id !== 'holder') : MOVE_TARGETS // 対戦中は、自分だけのホルダー（共有されない）は使わない
   // ms：演出を、盤面に出しておく時間。ブルームの演出は、相手の画面へは送らない（それぞれの画面で、盤面の変化から出す）
   const pushFx = (fx: PlayFxInput, emit = true, ms = 1300) => {
-    if (emit && fx.kind !== 'bloom') versus?.onEmit({ kind: 'fx', fx })
+    if (emit && fx.kind !== 'bloom' && fx.kind !== 'hit') versus?.onEmit({ kind: 'fx', fx })
     const id = ++fxSeq.current
     setFxList((l) => [...l, { ...fx, id }])
     window.setTimeout(() => setFxList((l) => l.filter((f) => f.id !== id)), ms)
@@ -706,6 +720,18 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
         })()
         break
       }
+      case 'holder1':
+      case 'holder3':
+      case 'holder4':
+      case 'holder5': {
+        // デッキの上から、n枚を、手札の横のホルダーに置く
+        const n = Number(action.slice('holder'.length))
+        const have = state[deck].length
+        if (have === 0) break
+        setState((s) => drawToHandHolder(s, side, n).state)
+        setMessage(`${who}のデッキの上から${Math.min(n, have)}枚を、ホルダーに置きました${have < n ? `（デッキが${have}枚しかありません）` : ''}`)
+        break
+      }
       case 'draw1':
         draw(side, 1)
         break
@@ -839,32 +865,131 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
     }
   }, [fullscreen])
 
-  // ===== ターンのステップ：ドロー → エール → メイン → パフォーマンス（そのあと、ターンチェンジ） =====
+  // ===== 対戦の準備（ターンが始まる前）=====
+  // デッキをセット → じゃんけん → 勝った人が先攻・後攻を決める → 先攻が準備（7枚引く・マリガン・ホロメンをセット）→ 準備完了 → 後攻が準備 → 準備完了 → 先攻からターン開始。
+  // 準備の状態（prep）は、対戦中だけ。null は、準備なし（準備が終わった・古い部屋・ひとりで使うとき）
+  const prep: PrepState | null = versus ? versus.prep : null
+  const setPrep = (next: PrepState | null) => versusRef.current?.onChange(stateRef.current, undefined, undefined, next)
+
+  const prepDeckPlaced = state[zoneId('me', 'deck')].length > 0 && state[zoneId('me', 'oshi')].length > 0
+  const handlePrepDeckDone = () => {
+    if (!prep || prep.step !== 'deck' || prep.deck.me) return
+    const deck = { ...prep.deck, me: true }
+    setPrep({ ...prep, deck, step: deck.opp ? 'janken' : 'deck' })
+  }
+  // 2人のデッキが、そろったら、じゃんけんへ（2人が同時に準備OKにしたときの、取りこぼしも、ここで直る）
+  useEffect(() => {
+    if (prep && prep.step === 'deck' && prep.deck.me && prep.deck.opp) setPrep({ ...prep, step: 'janken' })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prep?.step, prep?.deck.me, prep?.deck.opp])
+
+  // 先攻・後攻（じゃんけんに勝った人が、選ぶ）。first は、この画面から見た、先攻の側
+  const handlePrepChoose = (first: Side) => {
+    if (!prep || prep.step !== 'choose') return
+    setPrep({ ...prep, step: 'first', first })
+    setMessage(`${first === 'me' ? '自分' : '相手'}が先攻です。先攻プレイヤーの準備から、始めます`)
+  }
+
+  // 最初の手札・マリガン・準備完了（いま準備をしている側だけ）
+  const prepSide = preparingSide(prep)
+  const iAmPreparing = !!prep && prepSide === 'me'
+  const handlePrepDraw = () => {
+    if (!prep || !iAmPreparing || prep.drawn.me) return
+    setState((s) => drawCards(s, 'me', HAND_SIZE))
+    setPrep({ ...prep, drawn: { ...prep.drawn, me: true } })
+    setMessage(`デッキから${HAND_SIZE}枚を引きました`)
+  }
+  const handlePrepMulligan = () => {
+    if (!prep || !iAmPreparing || !prep.drawn.me) return
+    const times = prep.mulligan.me + 1
+    const n = mulliganDrawCount(times)
+    pushFx({ kind: 'shuffle', zone: zoneId('me', 'deck') })
+    setState((s) => mulliganHand(s, 'me', n))
+    setPrep({ ...prep, mulligan: { ...prep.mulligan, me: times } })
+    setMessage(`マリガン（${times}回目）：手札を全てデッキに戻して、シャッフルして、${n}枚を引き直しました`)
+  }
+  const handlePrepReady = () => {
+    if (!prep || !iAmPreparing) return
+    if (!prep.drawn.me) return setMessage('先に、手札を引いてください')
+    if (unitParts(stateRef.current[zoneId('me', 'center')]).holomen.length === 0) return setMessage('センターに、ホロメンをセットしてください')
+    if (prep.step === 'first') {
+      setPrep({ ...prep, step: 'second' })
+      setMessage('準備完了。相手（後攻）の準備を、待っています')
+      return
+    }
+    // 後攻の準備完了：準備を終えて、先攻のターンから始める（セットしたホロメンの「登場した」印は、消す）
+    const first = prep.first ?? 'me'
+    setState((s) => {
+      const next = { ...s }
+      for (const id of Object.keys(next) as ZoneId[]) if (next[id].some((c) => c.fresh)) next[id] = next[id].map((c) => (c.fresh ? { ...c, fresh: false } : c))
+      return next
+    })
+    setTurn({ first, active: first, me: first === 'me' ? 1 : 0, opp: first === 'opp' ? 1 : 0, phase: 'draw' })
+    setPrep(null)
+    setMessage(`準備が完了しました。${first === 'me' ? '自分' : '相手'}（先攻）のターンから、始まります`)
+  }
+
+  // ===== ターンのステップ：リセット → ドロー → エール → メイン → パフォーマンス（そのあと、ターンチェンジ） =====
+  // ・リセット：ステージのカードをクリックして、おやすみ／おやすみ＆バック移動／バック移動 などを選ぶ。終わったら、ボタンでドローへ
   // ・ドロー：デッキを画面の中央に出して、クリックで1枚引く
   // ・エール：エールデッキの上の1枚を、ステージのどのホロメンにつけるかを、クリック（タップ）で選ぶ
   // ・メイン：これまでどおり、自由に操作する。「メインステップ終了」で、パフォーマンスへ
-  // ・パフォーマンス：センターのホロメンをクリック → アーツを選ぶ → 相手のコラボ・センター・バックを選ぶと、ダメージを与える。「パフォーマンスステップ終了」で、ターンチェンジ
-  // ひとりで使うときは、ターンを進めている側（turn.active）の、どちらの側でも操作できる。対戦中は、自分のターンのときだけ
+  // ・パフォーマンス：センターかコラボのホロメンをクリック → アーツを選ぶ → 相手のコラボ・センター・バックを選ぶと、ダメージを与える。「パフォーマンスステップ終了」で、ターンチェンジ
+  // ひとりで使うときは、ターンを進めている側（turn.active）の、どちらの側でも操作できる。対戦中は、自分のターンのときだけ（準備の間は、操作しない）
   const stepSide: Side = turn.active
   const stepOther: Side = stepSide === 'me' ? 'opp' : 'me'
-  const canAct = !versus || turn.active === 'me'
-  const [attackArt, setAttackArt] = useState<ArtRow | null>(null) // 使うアーツを選んだあと、ダメージを与える相手を選んでいる最中
-  const [artModalOpen, setArtModalOpen] = useState(false)
-  const attackerZone = zoneId(stepSide, 'center')
-  const attackerHolomen = unitParts(state[attackerZone]).holomen
-  const attackerTop = isDamageableZone(state, attackerZone) ? attackerHolomen[attackerHolomen.length - 1] : undefined
-  const performing = canAct && turn.phase === 'performance'
-  const attackerDetail = useCardDetailForPreview(performing && attackerTop ? attackerTop.card.id : null)
-  const attackerArts = useMemo(() => (attackerDetail.detail?.arts ?? []).filter((a) => a.name || a.damage || a.effectText), [attackerDetail.detail])
-  const attackerPower = unitPower(state[attackerZone]) // パワーアップカウンターの合計（アーツのダメージに足す）
+  const canAct = (!versus || turn.active === 'me') && !prep
+  const [attack, setAttack] = useState<{ art: ArtRow; extra: number; from: ZoneId } | null>(null) // 使うアーツを選んだあと、ダメージを与える相手を選んでいる最中
+  const [artFrom, setArtFrom] = useState<ZoneId | null>(null) // アーツのメニューを出している、枠（センター・コラボ）
+  const [pendingChip, setPendingChip] = useState<{ kind: 'damage' | 'power' | 'hp'; amount: number } | null>(null) // 選んだカウンター（つけ先を、ステージで選ぶのを待っている）
+  const [resetMenu, setResetMenu] = useState<ZoneId | null>(null) // リセットステップ：メニューを出している枠
+  const [resetMove, setResetMove] = useState<{ from: ZoneId; rest: boolean } | null>(null) // リセットステップ：バックの移動先を選んでいる最中
 
-  // パフォーマンスステップを出る（相手のターンになった・ステップが変わった）と、アーツの選択は、やめる
+  const performing = canAct && turn.phase === 'performance'
+  const resetting = canAct && turn.phase === 'reset'
+  const centerZone = zoneId(stepSide, 'center')
+  const collabZone = zoneId(stepSide, 'collab')
+  const topHolomen = (z: ZoneId): PlayCard | undefined => {
+    if (!isDamageableZone(state, z)) return undefined
+    const hs = unitParts(state[z]).holomen
+    return hs[hs.length - 1]
+  }
+  const centerTop = topHolomen(centerZone)
+  const collabTop = topHolomen(collabZone)
+  const centerDetail = useCardDetailForPreview(performing && centerTop ? centerTop.card.id : null)
+  const collabDetail = useCardDetailForPreview(performing && collabTop ? collabTop.card.id : null)
+  const artsOf = (z: ZoneId): ArtRow[] => ((z === centerZone ? centerDetail : collabDetail).detail?.arts ?? []).filter((a) => a.name || a.damage || a.effectText)
+  // アーツを使えるホロメン（必要なエールが足りているアーツが、1つ以上ある）：光らせる
+  const readyAttackers = performing ? ([centerZone, collabZone] as ZoneId[]).filter((z) => topHolomen(z) && artsOf(z).some((a) => artPayable(a, state[z]))) : []
+  const menuTop = artFrom ? topHolomen(artFrom) : undefined
+  const menuDetail = artFrom === centerZone ? centerDetail : collabDetail
+
+  // ステップを出る（相手のターンになった・ステップが変わった）と、途中の選択は、やめる
   useEffect(() => {
     if (!performing) {
-      setAttackArt(null)
-      setArtModalOpen(false)
+      setAttack(null)
+      setArtFrom(null)
     }
   }, [performing])
+  useEffect(() => {
+    if (!resetting) {
+      setResetMenu(null)
+      setResetMove(null)
+    }
+  }, [resetting])
+  // Esc：選んでいる途中の操作を、やめる
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      setPendingChip(null)
+      setAttack(null)
+      setArtFrom(null)
+      setResetMenu(null)
+      setResetMove(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   const advancePhase = (phase: TurnPhase) => setTurn({ ...turnRef.current, phase })
 
@@ -895,9 +1020,70 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canAct, turn.phase, turn.active, state])
 
+  // カウンター（ダメージ・パワーアップ・最大HP）：タップ・クリックで選んで、つけ先を、ステージで選ぶ（もう一度タップすると、選ぶのをやめる）
+  const handleCounterTap = (kind: 'damage' | 'power' | 'hp', amount: number) => {
+    if (pendingChip?.kind === kind && pendingChip.amount === amount) {
+      setPendingChip(null)
+      return
+    }
+    setPendingChip({ kind, amount })
+    setAttack(null)
+    setArtFrom(null)
+    setMessage(`${kind === 'damage' ? 'ダメージ' : kind === 'power' ? 'パワーアップ' : '最大HP'}+${amount}：つけるホロメンを、ステージでクリック（タップ）してください`)
+  }
+  const chipZones = useMemo(() => [...attackTargetZones(state, 'me'), ...attackTargetZones(state, 'opp')], [state])
+
+  // リセットステップ：選んだカードに対する操作
+  const resetAction = (zone: ZoneId, act: 'rest' | 'wake' | 'restBack' | 'back' | 'toCenter') => {
+    setResetMenu(null)
+    const side = parseZone(zone)?.side ?? stepSide
+    const name = unitParts(stateRef.current[zone]).top?.card.card_name ?? ''
+    if (act === 'rest') {
+      setState((s) => setUnitRest(s, zone, true))
+      setMessage(`${name}を、おやすみにしました`)
+    } else if (act === 'wake') {
+      setState((s) => setUnitRest(s, zone, false))
+      setMessage(`${name}を、アクティブに戻しました`)
+    } else if (act === 'toCenter') {
+      setState((s) => moveUnit(s, zone, zoneId(side, 'center')))
+      setMessage(`${name}を、センターに移しました`)
+    } else {
+      if (emptyBackZones(stateRef.current, side, zone).length === 0) return setMessage('バックに、空いている枠がありません')
+      setResetMove({ from: zone, rest: act === 'restBack' })
+      setMessage(`${name}を移す、バックの空き枠を、クリック（タップ）してください`)
+    }
+  }
+  const wakeAll = () => {
+    const n = restedUnitZones(stateRef.current, stepSide).length
+    if (n === 0) return setMessage('おやすみ状態のホロメンは、いません')
+    setState((s) => wakeAllUnits(s, stepSide))
+    setMessage(`おやすみ状態のホロメン${n}枚を、アクティブに戻しました`)
+  }
+
   // 光っている枠を、クリック（タップ）したとき
   const handlePickZone = (zone: ZoneId) => {
+    // カウンターのつけ先
+    if (pendingChip) {
+      setPendingChip(null)
+      if (pendingChip.kind === 'damage') damageUnit(zone, pendingChip.amount)
+      else if (pendingChip.kind === 'power') powerUnit(zone, pendingChip.amount)
+      else hpUpUnit(zone, pendingChip.amount)
+      return
+    }
     if (!canAct) return
+    // リセットステップ
+    if (turnRef.current.phase === 'reset') {
+      if (resetMove) {
+        const { from, rest } = resetMove
+        setResetMove(null)
+        setState((s) => {
+          const moved = moveUnit(s, from, zone)
+          return rest ? setUnitRest(moved, zone, true) : moved
+        })
+        setMessage(rest ? 'おやすみにして、バックに移しました' : 'バックに移しました')
+      } else setResetMenu(zone)
+      return
+    }
     if (turnRef.current.phase === 'yell') {
       const yellDeck = zoneId(stepSide, 'yellDeck')
       const list = stateRef.current[yellDeck]
@@ -911,57 +1097,87 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
       return
     }
     if (turnRef.current.phase !== 'performance') return
-    if (!attackArt) {
-      setArtModalOpen(true) // センターのホロメンを選んだ：使うアーツを選ぶ
+    if (!attack) {
+      setArtFrom(zone) // アーツを使うホロメン（センター・コラボ）を選んだ：使うアーツを選ぶ
       return
     }
-    // ダメージを与える相手を選んだ：アーツのダメージ ＋ パワーアップ ＋ （相手の色が特攻対象色なら）特攻ダメージ
+    // ダメージを与える相手を選んだ：アーツのダメージ ＋ 追加（「+」の入力）＋ パワーアップ ＋ （相手の色が特攻対象色なら）特攻ダメージ
     const target = unitParts(stateRef.current[zone]).top
     const colors = parseAttribute(target?.card.attribute ?? '').colors
-    const r = calcArtDamage(attackArt, attackerPower, colors)
+    const power = unitPower(stateRef.current[attack.from])
+    const r = calcArtDamage(attack.art, power, colors, attack.extra)
     const parts = [String(r.base)]
+    if (r.extra > 0) parts.push(`追加+${r.extra}`)
     if (r.power > 0) parts.push(`パワーアップ+${r.power}`)
     if (r.special > 0) parts.push(`特攻+${r.special}`)
-    const note = `${attackerTop?.card.card_name ?? ''}の「${attackArt.name || 'アーツ'}」：${parts.join('、')} ＝ ${r.total}`
-    setAttackArt(null)
+    const attackerName = unitParts(stateRef.current[attack.from]).top?.card.card_name ?? ''
+    const note = `${attackerName}の「${attack.art.name || 'アーツ'}」：${parts.join('、')} ＝ ${r.total}`
+    const from = attack.from
+    setAttack(null)
     if (r.total <= 0) {
       setMessage(`${note}（ダメージが0のため、何も起きません）`)
       return
     }
-    damageUnit(zone, r.total, stateRef.current, note)
+    // 矢印が相手に届くころに、ダメージが入る（相手の画面にも、矢印を出す）
+    pushFx({ kind: 'attack', from, to: zone, amount: r.total }, true, 900)
+    window.setTimeout(() => damageUnit(zone, r.total, stateRef.current, note), 480)
   }
 
   // 枠を選ばせるモード（盤面の、光る枠）
   const pick = useMemo<PickState | null>(() => {
+    if (pendingChip) return chipZones.length > 0 ? { zones: chipZones, color: pendingChip.kind === 'damage' ? '#ef4444' : pendingChip.kind === 'power' ? '#f59e0b' : '#22c55e' } : null
     if (!canAct) return null
+    if (turn.phase === 'reset') {
+      if (resetMove) {
+        const zones = emptyBackZones(state, stepSide, resetMove.from)
+        return zones.length > 0 ? { zones, color: '#c084fc' } : null
+      }
+      if (resetMenu) return null
+      const zones = attackTargetZones(state, stepSide)
+      return zones.length > 0 ? { zones, color: '#c084fc' } : null
+    }
     if (turn.phase === 'yell') {
       const zones = yellTargetZones(state, stepSide)
       return zones.length > 0 ? { zones, color: '#4ce0e6' } : null
     }
     if (turn.phase === 'performance') {
-      if (attackArt) {
+      if (attack) {
         const zones = attackTargetZones(state, stepOther)
         return zones.length > 0 ? { zones, color: '#ef4444' } : null
       }
-      if (attackerTop) return { zones: [attackerZone], color: '#ffd76a' }
+      return readyAttackers.length > 0 ? { zones: readyAttackers, color: '#ffd76a' } : null
     }
     return null
-  }, [canAct, turn.phase, state, stepSide, stepOther, attackArt, artModalOpen, attackerTop, attackerZone])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingChip, chipZones, canAct, turn.phase, state, stepSide, stepOther, attack, resetMenu, resetMove, readyAttackers.join(',')])
 
   // 画面の上に出す、いまのステップの案内
-  const stepPrompt: { text: string; action?: { label: string; run: () => void } } | null = !canAct
-    ? null
-    : turn.phase === 'yell'
-      ? { text: 'エールステップ：エールデッキの上の1枚を、つけるホロメンをクリック（タップ）してください', action: { label: 'スキップ', run: skipYell } }
-      : turn.phase === 'performance'
-        ? attackArt
-          ? { text: attackTargetZones(state, stepOther).length > 0 ? `「${attackArt.name || 'アーツ'}」でダメージを与える相手（コラボ・センター・バック）を、クリック（タップ）してください` : '相手のステージにホロメンがいません', action: { label: 'やめる', run: () => setAttackArt(null) } }
-          : attackerTop
-            ? { text: artModalOpen ? '使うアーツを選んでください' : 'パフォーマンスステップ：アーツを使う、センターのホロメンをクリック（タップ）してください' }
-            : { text: 'パフォーマンスステップ：センターにホロメンがいません。「パフォーマンスステップ終了」で、ターンを終えます' }
-        : null
+  type PromptAction = { label: string; run: () => void }
+  const stepPrompt: { text: string; actions?: PromptAction[] } | null = pendingChip
+    ? { text: `${pendingChip.kind === 'damage' ? 'ダメージ' : pendingChip.kind === 'power' ? 'パワーアップ' : '最大HP'} +${pendingChip.amount}：つけるホロメンを、ステージでクリック（タップ）してください`, actions: [{ label: 'やめる', run: () => setPendingChip(null) }] }
+    : !canAct
+      ? null
+      : turn.phase === 'reset'
+        ? resetMove
+          ? { text: 'バックの、移す先の空き枠を、クリック（タップ）してください', actions: [{ label: 'やめる', run: () => setResetMove(null) }] }
+          : {
+              text: 'リセットステップ：カードをクリック（タップ）して、おやすみ／バック移動などを選んでください。終わったら「リセット完了」',
+              actions: [
+                { label: `おやすみを全員起こす（${restedUnitZones(state, stepSide).length}）`, run: wakeAll },
+                { label: 'リセット完了', run: () => handleTurnChange(stepSide) },
+              ],
+            }
+        : turn.phase === 'yell'
+          ? { text: 'エールステップ：エールデッキの上の1枚を、つけるホロメンをクリック（タップ）してください', actions: [{ label: 'スキップ', run: skipYell }] }
+          : turn.phase === 'performance'
+            ? attack
+              ? { text: attackTargetZones(state, stepOther).length > 0 ? `「${attack.art.name || 'アーツ'}」でダメージを与える相手（コラボ・センター・バック）を、クリック（タップ）してください` : '相手のステージにホロメンがいません', actions: [{ label: 'やめる', run: () => setAttack(null) }] }
+              : readyAttackers.length > 0
+                ? { text: artFrom ? '使うアーツを選んでください' : 'パフォーマンスステップ：アーツを使う、センターかコラボのホロメンをクリック（タップ）してください' }
+                : { text: 'パフォーマンスステップ：アーツを使えるホロメンがいません（エール不足・アーツなし）。「パフォーマンスステップ終了」で、ターンを終えます' }
+            : null
 
-  // ===== 盤面の変化から出す演出：サポートの発動（画面の中央）・ブルーム（その枠） =====
+  // ===== 盤面の変化から出す演出：サポートの発動（画面の中央）・ブルーム・ダメージを受けた枠 =====
   // 相手が動かした分も、それぞれの画面で、盤面の変化から見つけて出す（最初の読み込み・空の盤面からの変化では、出さない）
   const [castQueue, setCastQueue] = useState<SupportCast[]>([])
   const castSeq = useRef(0)
@@ -973,14 +1189,16 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
     const casts = detectSupportCasts(prev, state)
     if (casts.length > 0) setCastQueue((q) => [...q, ...casts.map((c) => ({ id: ++castSeq.current, card: c.card, who: versus ? (c.side === 'me' ? 'あなた' : '相手') : c.side === 'me' ? '自分' : '相手' }))])
     for (const b of detectBlooms(prev, state)) pushFx({ kind: 'bloom', zone: b.zone, stage: b.stage, label: b.label }, false, 1900)
+    for (const h of detectHits(prev, state)) pushFx({ kind: 'hit', zone: h.zone, amount: h.amount }, false, 1100)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state])
   const handleCastDone = useCallback((id: number) => setCastQueue((q) => q.filter((c) => c.id !== id)), [])
 
-  // ターンのボタン：メインステップ終了 → パフォーマンスステップへ／パフォーマンスステップ終了 → ターンチェンジ。
-  // ターンチェンジ：SUPPORT（旧ログ）のカードをアーカイブへ／相手のターン数を+1／相手のステージの警告マークを消す／盤面の背景（ターンを進める側が紺色）を入れ替える。次の側は、ドローステップから始まる
+  // ターンのボタン：リセットステップ終了 → ドロー／メインステップ終了 → パフォーマンスステップへ／パフォーマンスステップ終了 → ターンチェンジ。
+  // ターンチェンジ：SUPPORT（旧ログ）のカードをアーカイブへ／相手のターン数を+1／相手のステージの警告マークを消す／盤面の背景（ターンを進める側が紺色）を入れ替える。次の側は、リセットステップから始まる
   const handleTurnChange = (side: Side) => {
     if (versus && side === 'opp') return // 対戦中、相手のボタンは、押せない（相手が、自分の画面で押す）
+    if (versus?.prep) return // 準備の間は、ターンを進められない
     const t = turnRef.current
     if (side !== t.active) {
       setMessage('いまは、相手のターンです')
@@ -990,9 +1208,14 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
       setMessage(t.phase === 'draw' ? 'ドローステップです。デッキをクリックして、1枚引いてください' : 'エールステップです。エールをつけるホロメンを選んでください')
       return
     }
+    if (t.phase === 'reset') {
+      setTurn({ ...t, phase: 'draw' })
+      setMessage('ドローステップです。デッキをクリックして、1枚引いてください')
+      return
+    }
     if (t.phase === 'main') {
       setTurn({ ...t, phase: 'performance' })
-      setMessage('パフォーマンスステップです。アーツを使うセンターのホロメンを、クリック（タップ）してください')
+      setMessage('パフォーマンスステップです。アーツを使う、センターかコラボのホロメンを、クリック（タップ）してください')
       return
     }
     const r = endTurn(stateRef.current, t, side)
@@ -1001,7 +1224,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
     setState(next)
     setTurn(r.turn)
     const name = (s: Side) => (s === 'me' ? '自分' : '相手')
-    setMessage(`${name(side)}のターンを終えました。${r.sent > 0 ? `SUPPORT のカード${r.sent}枚を、アーカイブへ送りました。` : ''}${next !== r.state ? `${name(other)}の公開中のカードは、非公開に戻しました。` : ''}${name(other)}は${r.turn[other]}ターン目です（ドローステップ）`)
+    setMessage(`${name(side)}のターンを終えました。${r.sent > 0 ? `SUPPORT のカード${r.sent}枚を、アーカイブへ送りました。` : ''}${next !== r.state ? `${name(other)}の公開中のカードは、非公開に戻しました。` : ''}${name(other)}は${r.turn[other]}ターン目です（リセットステップ）`)
   }
 
   // 手札の左のボタン：手札を、全てデッキに戻す（シャッフルはしない）／手札を並び替える（デッキの並びと同じ：ホロメン→サポート→その他）
@@ -1022,6 +1245,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
 
   // 先攻・後攻を入れ替える
   const toggleFirst = () => {
+    if (versus?.prep) return // 対戦の準備中は、先攻・後攻を、入れ替えられない
     const t = turnRef.current
     const first: Side = t.first === 'me' ? 'opp' : 'me'
     // 先攻になった人が1、後攻になった人が0。先攻が、ターンを進める側になる
@@ -1064,6 +1288,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
   const [jankenResult, setJankenResult] = useState<{ mine: number; theirs: number; outcome: 'win' | 'lose' | 'draw' } | null>(null)
   const jankenMineRef = useRef<number | null>(null)
   const jankenTheirsRef = useRef<number | null>(null)
+  const jankenRound = useRef(0) // 準備のじゃんけんの、何回目か（あいこで、増える。古い手を、取り違えないため）
   const JANKEN = ['グー', 'チョキ', 'パー']
   const revealJanken = () => {
     const mine = jankenMineRef.current
@@ -1075,8 +1300,15 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
     const outcome = mine === theirs ? 'draw' : (mine - theirs + 3) % 3 === 2 ? 'win' : 'lose' // グー>チョキ>パー>グー
     setJankenResult({ mine, theirs, outcome })
     setMessage(`じゃんけん：自分 ${JANKEN[mine]} ／ 相手 ${JANKEN[theirs]} → ${outcome === 'win' ? '自分の勝ち' : outcome === 'lose' ? '相手の勝ち' : 'あいこ'}`)
+    // 対戦の準備のじゃんけん：勝った側が、先攻・後攻を決める画面へ進める（あいこは、もう一度）
+    if (prep?.step === 'janken') {
+      jankenRound.current += 1
+      if (outcome === 'win') setPrep({ ...prep, step: 'choose', jankenWinner: 'me' })
+    }
   }
-  const receiveJanken = (hand: number) => {
+  const receiveJanken = (wireHand: number) => {
+    const hand = wireHand % 3
+    if (prep?.step === 'janken' && Math.floor(wireHand / 3) < jankenRound.current) return // 前の回の手（遅れて届いた）は、無視する
     jankenTheirsRef.current = hand
     if (jankenMineRef.current !== null) revealJanken()
     else setMessage('相手が、じゃんけんの手を出しました。あなたも、手を出してください')
@@ -1085,7 +1317,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
     jankenMineRef.current = hand
     setJankenMine(hand)
     if (versus) {
-      versus.onEmit({ kind: 'janken', hand })
+      versus.onEmit({ kind: 'janken', hand: prep?.step === 'janken' ? jankenRound.current * 3 + hand : hand })
       if (jankenTheirsRef.current !== null) revealJanken()
       else setMessage('じゃんけん：相手の手を待っています…（出したあとも、手は変えられます）')
     } else {
@@ -1093,6 +1325,14 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
       revealJanken()
     }
   }
+  useEffect(() => {
+    if (prep?.step !== 'janken' || jankenMine === null || !versus) return
+    const t = window.setInterval(() => {
+      if (jankenMineRef.current !== null) versusRef.current?.onEmit({ kind: 'janken', hand: jankenRound.current * 3 + jankenMineRef.current })
+    }, 2500)
+    return () => window.clearInterval(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prep?.step, jankenMine])
   useEffect(() => {
     if (!jankenResult) return
     const t = window.setTimeout(() => setJankenResult(null), 4500)
@@ -1323,14 +1563,6 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
     return { zone: selectedUnit.zone, dmg, pow: unitPower(selectedUnit.cards), hpUp, maxHp, remain: maxHp === null ? null : Math.max(0, maxHp - dmg) }
   })()
 
-  // ダメージカウンターをタップ／クリックしたとき：選んでいるホロメンに与える
-  const handleCounterTap = (kind: 'damage' | 'power' | 'hp', amount: number) => {
-    if (!selectedDamage) setMessage('カウンターを乗せるホロメンを盤面で選ぶか、カウンターをホロメンへドラッグしてください')
-    else if (kind === 'damage') damageUnit(selectedDamage.zone, amount)
-    else if (kind === 'power') powerUnit(selectedDamage.zone, amount)
-    else hpUpUnit(selectedDamage.zone, amount)
-  }
-
   // 戻る：直前の操作を取り消す（UNDO_LIMIT 回前まで）
   const undo = () => {
     const snap = historyRef.current[historyRef.current.length - 1]
@@ -1353,6 +1585,30 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
     setMessage(`1つ前に戻しました${historyRef.current.length > 0 ? `（あと${historyRef.current.length}回戻せます）` : ''}`)
   }
 
+  // 保存したデッキを選ぶ、セレクトボックス（デッキ読み込みの欄と、対戦の準備の画面で、共通）
+  const deckSelectEl = (
+      <select className="field flex-1 min-w-0 text-sm" value={deckId} onChange={(e) => setDeckId(e.target.value)} aria-label="読み込むデッキ">
+        <option value="">デッキを選ぶ</option>
+        {(['recipe', 'user'] as const).map((src) => {
+          const list = saved.decks.filter((d) => d.source === src)
+          if (list.length === 0) return null
+          // 2種類のデッキが、両方あるときだけ、見出しを付ける
+          const options = list.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.name}
+            </option>
+          ))
+          return saved.decks.some((d) => d.source !== src) ? (
+            <optgroup key={src} label={src === 'recipe' ? 'デッキレシピ' : 'マイデッキ'}>
+              {options}
+            </optgroup>
+          ) : (
+            options
+          )
+        })}
+      </select>
+  )
+
   // 保存したデッキの読み込み（PCは右の列、スマホは、上の「デッキ選択」ボタンから開く）
   const deckSetupUi = (
       <section className="hud-panel p-3">
@@ -1364,26 +1620,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
         ) : (
           <>
             <div className="flex gap-1.5 mb-2">
-              <select className="field flex-1 min-w-0 text-sm" value={deckId} onChange={(e) => setDeckId(e.target.value)} aria-label="読み込むデッキ">
-                <option value="">デッキを選ぶ</option>
-                {(['recipe', 'user'] as const).map((src) => {
-                  const list = saved.decks.filter((d) => d.source === src)
-                  if (list.length === 0) return null
-                  // 2種類のデッキが、両方あるときだけ、見出しを付ける
-                  const options = list.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name}
-                    </option>
-                  ))
-                  return saved.decks.some((d) => d.source !== src) ? (
-                    <optgroup key={src} label={src === 'recipe' ? 'デッキレシピ' : 'マイデッキ'}>
-                      {options}
-                    </optgroup>
-                  ) : (
-                    options
-                  )
-                })}
-              </select>
+              {deckSelectEl}
               {!versus && (
                 <select className="field text-sm" value={deckSide} onChange={(e) => setDeckSide(e.target.value as Side)} aria-label="配置する側">
                   <option value="me">自分</option>
@@ -1502,31 +1739,81 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
       {stepPrompt && (
         <div
           role="status"
-          className="fixed z-[74] flex items-center gap-2 rounded-lg border-2 border-[#ffd76a]/80 bg-[#061217]/95 px-3 py-2 text-xs font-bold text-[#fff3b0] shadow-lg"
+          className="fixed z-[74] flex flex-wrap items-center gap-2 rounded-lg border-2 border-[#ffd76a]/80 bg-[#061217]/95 px-3 py-2 text-xs font-bold text-[#fff3b0] shadow-lg"
           style={{ top: `calc(${(fullscreen || versus ? 8 : 60) + 54}px + env(safe-area-inset-top, 0px))`, left: 8, right: 8, maxWidth: 560, marginLeft: 'auto', marginRight: 'auto' }}
         >
           <span className="min-w-0 flex-1">{stepPrompt.text}</span>
-          {stepPrompt.action && (
-            <button type="button" className="btn-secondary shrink-0 whitespace-nowrap" onClick={stepPrompt.action.run}>
-              {stepPrompt.action.label}
+          {stepPrompt.actions?.map((a) => (
+            <button key={a.label} type="button" className="btn-secondary shrink-0 whitespace-nowrap" onClick={a.run}>
+              {a.label}
             </button>
-          )}
+          ))}
         </div>
       )}
       <SupportCastOverlay queue={castQueue} onDone={handleCastDone} />
-      {artModalOpen && attackerTop && (
+      {artFrom && menuTop && (
         <ArtPickModal
-          anchorZone={attackerZone}
-          card={attackerTop.card}
-          arts={attackerArts}
-          loading={attackerDetail.loading}
-          error={attackerDetail.error}
-          power={attackerPower}
-          onPick={(a) => {
-            setAttackArt(a)
-            setArtModalOpen(false)
+          anchorZone={artFrom}
+          card={menuTop.card}
+          arts={artsOf(artFrom)}
+          loading={menuDetail.loading}
+          error={menuDetail.error}
+          power={unitPower(state[artFrom])}
+          payable={(a) => artPayable(a, state[artFrom])}
+          onPick={(art, extra) => {
+            setAttack({ art, extra, from: artFrom })
+            setArtFrom(null)
           }}
-          onClose={() => setArtModalOpen(false)}
+          onClose={() => setArtFrom(null)}
+        />
+      )}
+      {resetMenu &&
+        (() => {
+          const top = unitParts(state[resetMenu]).top
+          if (!top) return null
+          const key = parseZone(resetMenu)?.key
+          const front = key === 'center' || key === 'collab'
+          const centerEmpty = state[zoneId(stepSide, 'center')].length === 0
+          return (
+            <ZoneActionMenu
+              anchorZone={resetMenu}
+              title={top.card.card_name}
+              subtitle={`リセットステップ${top.rested ? '（おやすみ中）' : ''}`}
+              onClose={() => setResetMenu(null)}
+              actions={[
+                { id: 'rest', label: 'おやすみ', hint: 'カードを横向き（おやすみ）にします', disabled: !!top.rested, onSelect: () => resetAction(resetMenu, 'rest') },
+                ...(top.rested ? [{ id: 'wake', label: 'アクティブにする', hint: '縦向きに戻します', onSelect: () => resetAction(resetMenu, 'wake') }] : []),
+                ...(front
+                  ? [
+                      { id: 'restBack', label: 'おやすみ＆バック移動', hint: 'おやすみにして、バックの空き枠に移します', onSelect: () => resetAction(resetMenu, 'restBack') },
+                      { id: 'back', label: 'バック移動', hint: 'そのままの向きで、バックの空き枠に移します', onSelect: () => resetAction(resetMenu, 'back') },
+                    ]
+                  : []),
+                ...(!front && centerEmpty ? [{ id: 'toCenter', label: 'センターへ移動', hint: 'センターが空いています', onSelect: () => resetAction(resetMenu, 'toCenter') }] : []),
+              ]}
+            />
+          )
+        })()}
+      {/* 対戦の準備（デッキをセット・じゃんけん・先攻後攻・手札とマリガン・準備完了） */}
+      {prep && (
+        <PrepFlow
+          prep={prep}
+          oppName={oppDisplayName}
+          deckSelect={saved.decks.length === 0 ? <p className="text-xs text-[#ffcf8a]">読み込めるデッキがありません。ログインして、デッキを作ってから、ここで読み込めます</p> : deckSelectEl}
+          deckListReady={saved.ready}
+          canSetDeck={!!deckId}
+          deckPlaced={prepDeckPlaced}
+          onSetDeck={() => void handleSetupDeck()}
+          onDeckDone={handlePrepDeckDone}
+          jankenMine={jankenMine}
+          jankenResult={jankenResult}
+          onJanken={pickJanken}
+          onChoose={handlePrepChoose}
+          handCount={state[zoneId('me', 'hand')].length}
+          centerSet={unitParts(state[zoneId('me', 'center')]).holomen.length > 0}
+          onDraw={handlePrepDraw}
+          onMulligan={handlePrepMulligan}
+          onReady={handlePrepReady}
         />
       )}
       {turnBanner && <TurnChangeBanner key={turnBanner.id} side={turnBanner.side} title={turnBanner.title} sub={turnBanner.sub} onDone={closeTurnBanner} />}
@@ -1559,7 +1846,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
       )}
 
       {/* じゃんけんの結果（互いが手を出したあと） */}
-      {jankenResult &&
+      {jankenResult && !prep &&
         createPortal(
           <div className="fixed inset-0 z-[96] grid place-items-center bg-black/55" onClick={() => setJankenResult(null)}>
             <div className="hud-panel px-8 py-6 text-center" style={{ background: 'var(--hud-bg, #061217)' }}>
@@ -1688,6 +1975,8 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
             fx={fxList}
             turn={turn}
             concealSide={versus ? 'opp' : undefined}
+            hideStage={prep ? 'opp' : undefined}
+            lockTurn={!!prep}
             oshiSkills={oshiSkills}
             skillUsed={skillUsed}
             hpOf={hpOf}
@@ -1700,7 +1989,8 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
         <div className="xl:sticky xl:top-2 xl:self-start xl:h-[calc(100dvh-110px)] min-w-0">
           <DamageCounterStrip
             compact={isTouch}
-            hint={isTouch ? '長押ししてホロメンへドラッグ（選んだホロメンには、タップでも）' : 'ホロメンへドラッグ。選んでいるホロメンには、クリックでも'}
+            hint={isTouch ? '長押ししてホロメンへドラッグ（タップすると、つけ先を、ステージで選べます）' : 'ホロメンへドラッグ。クリックすると、つけ先を、ステージで選べます'}
+            pending={pendingChip}
             onDragStart={setDrag}
             onDragEnd={clearDrag}
             onTouchDragStart={(e, item, ghost) => touchDrag.begin(e, item, ghost)}

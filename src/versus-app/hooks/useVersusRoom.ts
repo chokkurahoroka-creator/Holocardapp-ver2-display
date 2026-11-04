@@ -2,9 +2,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
-import { emptyState, initialTurn, swapTurn, type PlayState, type TurnState } from '../utils/playfield'
+import { emptyState, initialTurn, normalizePrep, swapPrep, swapTurn, type PlayState, type PrepState, type TurnState } from '../utils/playfield'
 import type { DeckCard } from '../utils/deckImage'
-import { emptyWire, fromWire, swapSides, swapSkillKeys, swapZoneId, toWire, turnFromWire, wireCardIds, type RemoteEvent, type RemoteEventInput, type WireDoc } from '../versus/wire'
+import { emptyWire, fromWire, mergeDocs, prepFromWire, swapSides, swapSkillKeys, swapZoneId, toWire, turnFromWire, wireCardIds, type RemoteEvent, type RemoteEventInput, type WireDoc } from '../versus/wire'
 
 const COLUMNS = 'id, set_code, type, slot, card_name, card_type, attribute, stage, rarity, card_number, image_url'
 const LAST_CODE_KEY = 'horoka-versus:lastCode'
@@ -49,6 +49,7 @@ export function useVersusRoom() {
   const [state, setState] = useState<PlayState>(emptyState)
   const [skillUsed, setSkillUsed] = useState<Record<string, boolean>>({})
   const [turn, setTurn] = useState<TurnState>(initialTurn)
+  const [prep, setPrep] = useState<PrepState | null>(null)
   const [peerOnline, setPeerOnline] = useState(false)
   const [lastEvent, setLastEvent] = useState<RemoteEvent | null>(null)
   const [error, setError] = useState('')
@@ -59,6 +60,7 @@ export function useVersusRoom() {
   const stateRef = useRef<PlayState>(state)
   const skillRef = useRef<Record<string, boolean>>({})
   const turnRef = useRef<TurnState>(initialTurn())
+  const prepRef = useRef<PrepState | null>(null)
   const versionRef = useRef(-1)
   const channelRef = useRef<RealtimeChannel | null>(null)
   const cardCache = useRef<Map<number, DeckCard>>(new Map())
@@ -95,9 +97,12 @@ export function useVersusRoom() {
       skillRef.current = su
       const tn = turnFromWire(doc, seat === 'guest')
       turnRef.current = tn
+      const pp = prepFromWire(doc, seat === 'guest')
+      prepRef.current = pp
       setState(st)
       setSkillUsed(su)
       setTurn(tn)
+      setPrep(pp)
       setRoom((r) => (r ? { ...r, hostName: row.host_name, guestName: row.guest_name } : r))
     },
     [ensureCards]
@@ -120,20 +125,33 @@ export function useVersusRoom() {
   const flush = useCallback(async () => {
     if (inFlight.current) return
     inFlight.current = true
+    let merges = 0
     try {
       while (pending.current) {
         pending.current = false
         const r = roomRef.current
         if (!r) break
         const guest = r.seat === 'guest'
-        const doc = toWire(guest ? swapSides(stateRef.current) : stateRef.current, guest ? swapSkillKeys(skillRef.current) : skillRef.current, guest ? swapTurn(turnRef.current) : turnRef.current)
+        const doc = toWire(guest ? swapSides(stateRef.current) : stateRef.current, guest ? swapSkillKeys(skillRef.current) : skillRef.current, guest ? swapTurn(turnRef.current) : turnRef.current, guest ? swapPrep(prepRef.current) : prepRef.current)
         const { data, error: err } = await supabase.rpc('versus_update_state', { p_room: r.id, p_expected: versionRef.current, p_state: doc })
         if (err) {
           setError(err.message)
           break
         }
         if (data === -1) {
-          // 相手の操作が、先に保存されていた：最新の盤面に取り直す（いまの操作は、取り消される）
+          // 相手の操作が、先に保存されていた
+          const { data: latest } = await supabase.from('versus_rooms').select('*').eq('id', r.id).maybeSingle()
+          const row = latest as Row | null
+          const remoteDoc = row && row.state && (row.state as WireDoc).v === 1 ? (row.state as WireDoc) : null
+          // 対戦の準備の間は、2人とも自分の側だけを動かすので、相手の保存と混ぜて、保存し直す（操作は、取り消さない）
+          if (row && row.status !== 'closed' && remoteDoc && merges < 3 && (normalizePrep(remoteDoc.pp) || normalizePrep(doc.pp))) {
+            merges++
+            const merged = mergeDocs(remoteDoc, doc, guest ? 'opp' : 'me')
+            await applyRow({ ...row, state: merged }, true)
+            pending.current = true
+            continue
+          }
+          // それ以外：最新の盤面に取り直す（いまの操作は、取り消される）
           pending.current = false
           await refetch()
           setNotice('相手の操作と重なったため、最新の盤面に戻しました。もう一度操作してください')
@@ -144,10 +162,10 @@ export function useVersusRoom() {
     } finally {
       inFlight.current = false
     }
-  }, [refetch])
+  }, [applyRow, refetch])
 
   const push = useCallback(
-    (next: PlayState, skills?: Record<string, boolean>, tn?: TurnState) => {
+    (next: PlayState, skills?: Record<string, boolean>, tn?: TurnState, pp?: PrepState | null) => {
       for (const id of Object.keys(next) as (keyof PlayState)[]) next[id].forEach((c) => cardCache.current.set(c.card.id, c.card))
       stateRef.current = next
       setState(next)
@@ -158,6 +176,10 @@ export function useVersusRoom() {
       if (tn) {
         turnRef.current = tn
         setTurn(tn)
+      }
+      if (pp !== undefined) {
+        prepRef.current = pp
+        setPrep(pp)
       }
       pending.current = true
       void flush()
@@ -176,7 +198,7 @@ export function useVersusRoom() {
     else if (payload.kind === 'janken') setLastEvent({ id, kind: 'janken', hand: payload.hand })
     else if (payload.kind === 'fx') {
       const fx = payload.fx
-      setLastEvent({ id, kind: 'fx', fx: fx.kind === 'shuffle' ? { kind: 'shuffle', zone: swapZoneId(fx.zone) } : { kind: fx.kind, from: swapZoneId(fx.from), to: swapZoneId(fx.to), card: fx.card } })
+      setLastEvent({ id, kind: 'fx', fx: fx.kind === 'shuffle' ? { kind: 'shuffle', zone: swapZoneId(fx.zone) } : fx.kind === 'attack' ? { kind: 'attack', from: swapZoneId(fx.from), to: swapZoneId(fx.to), amount: fx.amount } : { kind: fx.kind, from: swapZoneId(fx.from), to: swapZoneId(fx.to), card: fx.card } })
     }
   }, [])
 
@@ -276,9 +298,21 @@ export function useVersusRoom() {
       await enter(data as Row, uid)
     })
 
+  // 運営が作った「予約ルーム」なら、最初に入った人が、ホストの席に座る。
+  // 予約ルームではないとき・データベースの追加設定（supabase/versus_admin.sql）が無いときは、null（ふつうの入室になる）
+  const claimReserved = async (code: string, name: string): Promise<Row | null> => {
+    const { data, error: err } = await supabase.rpc('versus_claim_reserved', { p_code: code, p_name: name })
+    return err || !data ? null : (data as Row)
+  }
+
   const join = (code: string, name: string) =>
     run(async () => {
       const uid = await ensureSession()
+      const claimed = await claimReserved(code, name)
+      if (claimed) {
+        await enter(claimed, uid)
+        return
+      }
       const { data, error: err } = await supabase.rpc('versus_join_room', { p_code: code, p_name: name })
       if (err) throw new Error(err.message)
       await enter(data as Row, uid)
@@ -292,6 +326,8 @@ export function useVersusRoom() {
     setState(emptyState())
     setSkillUsed({})
     setTurn(initialTurn())
+    setPrep(null)
+    prepRef.current = null
     pending.current = false
     try {
       localStorage.removeItem(LAST_CODE_KEY)
@@ -310,5 +346,5 @@ export function useVersusRoom() {
     }
   }
 
-  return { room, state, skillUsed, turn, peerOnline, lastEvent, error, notice, busy, create, join, leave, push, emit, lastCode, clearNotice: () => setNotice(''), clearError: () => setError('') }
+  return { room, state, skillUsed, turn, prep, peerOnline, lastEvent, error, notice, busy, create, join, leave, push, emit, lastCode, clearNotice: () => setNotice(''), clearError: () => setError('') }
 }

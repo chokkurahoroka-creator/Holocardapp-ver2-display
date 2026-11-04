@@ -4,6 +4,7 @@ import { PlayfieldPanel } from '../components/PlayfieldPanel'
 import { useVersusRoom, VERSUS_NAME_KEY } from '../hooks/useVersusRoom'
 import { useRoleInfo } from '../hooks/useRoleInfo'
 import { VersusLogin } from './VersusLogin'
+import { buildRoomLink } from './roomLink'
 import type { VersusSync } from './wire'
 
 // 友達との対戦ページ：ルームを作る／コードで入る → 同じ盤面を、リアルタイムで共有して遊ぶ
@@ -11,7 +12,10 @@ export default function VersusApp() {
   const v = useVersusRoom()
   const { info: roleInfo, loading: roleLoading, signedIn, email } = useRoleInfo() // ルームを作れるのは、管理者・サブ管理者・メンバーだけ（参加・観戦は、誰でも）
   const { room, error, notice, busy } = v
+  // 名前入りのリンク（?room=コード&name=名前）で開いたときは、その名前で、自動で入室する（大会で、参加者に配るリンク）
+  const urlName = useRef(new URLSearchParams(window.location.search).get('name')?.trim().slice(0, 20) ?? '')
   const [name, setName] = useState(() => {
+    if (urlName.current) return urlName.current
     try {
       return localStorage.getItem(VERSUS_NAME_KEY) ?? ''
     } catch {
@@ -36,7 +40,8 @@ export default function VersusApp() {
     if (triedRejoin.current) return
     triedRejoin.current = true
     const last = v.lastCode()
-    if (last && !urlCode.current) void v.join(last, name || 'プレイヤー')
+    if (urlCode.current.length === 6 && urlName.current) void v.join(urlCode.current, urlName.current)
+    else if (last && !urlCode.current) void v.join(last, name || 'プレイヤー')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -53,11 +58,12 @@ export default function VersusApp() {
       state: v.state,
       skillUsed: v.skillUsed,
       turn: v.turn,
+      prep: v.prep,
       onChange: v.push,
       onEmit: v.emit,
       lastEvent: v.lastEvent,
       roomCode: room.code,
-      shareUrl: `${window.location.origin}${window.location.pathname}?room=${room.code}`,
+      shareUrl: buildRoomLink(room.code), // 表示サイト（display）の /versus のリンク
       myName: (room.seat === 'host' ? room.hostName : room.guestName) ?? '自分',
       oppName: (room.seat === 'host' ? room.guestName : room.hostName) ?? '相手',
       peerOnline: v.peerOnline,
