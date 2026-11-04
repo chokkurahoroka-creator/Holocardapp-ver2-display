@@ -3,6 +3,7 @@ import { useLayoutEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { YELL_COLOR_HEX, type ArtRow } from '../types/artsSkills'
 import { isPlusDamage, parseDamage, type ZoneId } from '../utils/playfield'
+import { useNarrowScreen } from './ZoneActionMenu'
 import type { DeckCard } from '../utils/deckImage'
 
 // パフォーマンスステップ：センター・コラボのホロメンの、どのアーツを使うかを選ぶメニュー。
@@ -14,12 +15,14 @@ const MENU_MAX_W = 380
 const GAP = 10
 
 export function ArtPickModal({ anchorZone, card, arts, loading, error, power, payable, onPick, onClose }: { anchorZone: ZoneId; card: DeckCard; arts: ArtRow[]; loading: boolean; error: string; power: number; payable: (art: ArtRow) => boolean; onPick: (art: ArtRow, extra: number) => void; onClose: () => void }) {
+  const narrow = useNarrowScreen()
   const [rect, setRect] = useState<DOMRect | null>(null)
   const [vp, setVp] = useState({ w: window.innerWidth, h: window.innerHeight })
   const [extra, setExtra] = useState<Record<number, string>>({}) // 「+」のアーツに、追加するダメージ（入力中の文字）
 
   // カードの、画面上の位置（ズームやスクロールで動くので、そのたびに測り直す）
   useLayoutEffect(() => {
+    if (narrow) return
     const measure = () => {
       const el = document.querySelector(`[data-pf-zone="${anchorZone}"]`)
       setRect(el ? el.getBoundingClientRect() : null)
@@ -32,7 +35,7 @@ export function ArtPickModal({ anchorZone, card, arts, loading, error, power, pa
       window.removeEventListener('resize', measure)
       window.removeEventListener('scroll', measure, true)
     }
-  }, [anchorZone])
+  }, [anchorZone, narrow])
 
   const w = Math.min(vp.w - 16, MENU_MAX_W)
   const cx = rect ? rect.left + rect.width / 2 : vp.w / 2
@@ -47,12 +50,8 @@ export function ArtPickModal({ anchorZone, card, arts, loading, error, power, pa
   const extraOf = (i: number): number => Math.max(0, Math.floor(Number(extra[i] ?? '0')) || 0)
   const bump = (i: number, d: number) => setExtra((m) => ({ ...m, [i]: String(extraOf(i) + d) }))
 
-  return createPortal(
+  const content = (
     <>
-      <div className="fixed inset-0 z-[89]" onClick={onClose} />
-      <div role="dialog" aria-label="アーツを選ぶ" className="fixed z-[90]" style={{ left, width: w, ...pos }}>
-        {rect && <div aria-hidden style={{ position: 'absolute', left: caretLeft - 8, [above ? 'bottom' : 'top']: -8, width: 16, height: 16, transform: 'rotate(45deg)', background: '#061217', borderRight: above ? '2px solid #ffd76a' : undefined, borderBottom: above ? '2px solid #ffd76a' : undefined, borderLeft: above ? undefined : '2px solid #ffd76a', borderTop: above ? undefined : '2px solid #ffd76a' }} />}
-        <div className="overflow-y-auto rounded-xl border-2 border-[#ffd76a] p-2.5 shadow-2xl" style={{ background: '#061217', maxHeight: maxH }}>
           <div className="mb-2 flex items-center gap-2">
             <h3 className="hud-font truncate text-sm font-bold text-white">
               {card.card_name}
@@ -116,6 +115,28 @@ export function ArtPickModal({ anchorZone, card, arts, loading, error, power, pa
               )
             })}
           </ul>
+    </>
+  )
+
+  // スマホ：画面の中央のモーダル（カードの横に出すと、はみ出すため）
+  if (narrow) {
+    return createPortal(
+      <div className="fixed inset-0 z-[90] grid place-items-center bg-black/70 p-3" onClick={onClose}>
+        <div role="dialog" aria-modal="true" aria-label="アーツを選ぶ" className="w-full overflow-y-auto rounded-2xl border-2 border-[#ffd76a] p-3 shadow-2xl" style={{ maxWidth: 420, maxHeight: 'calc(100dvh - 24px)', background: '#061217', paddingBottom: 'calc(12px + env(safe-area-inset-bottom, 0px))' }} onClick={(e) => e.stopPropagation()}>
+          {content}
+        </div>
+      </div>,
+      document.body
+    )
+  }
+
+  return createPortal(
+    <>
+      <div className="fixed inset-0 z-[89]" onClick={onClose} />
+      <div role="dialog" aria-label="アーツを選ぶ" className="fixed z-[90]" style={{ left, width: w, ...pos }}>
+        {rect && <div aria-hidden style={{ position: 'absolute', left: caretLeft - 8, [above ? 'bottom' : 'top']: -8, width: 16, height: 16, transform: 'rotate(45deg)', background: '#061217', borderRight: above ? '2px solid #ffd76a' : undefined, borderBottom: above ? '2px solid #ffd76a' : undefined, borderLeft: above ? undefined : '2px solid #ffd76a', borderTop: above ? undefined : '2px solid #ffd76a' }} />}
+        <div className="overflow-y-auto rounded-xl border-2 border-[#ffd76a] p-2.5 shadow-2xl" style={{ background: '#061217', maxHeight: maxH }}>
+          {content}
         </div>
       </div>
     </>,

@@ -873,3 +873,11 @@ export function mergePrep(remote: PrepState | null, mine: PrepState | null, mySi
     mulligan: { [mySide]: mine.mulligan[mySide], [other]: remote.mulligan[other] } as Record<Side, number>,
   }
 }
+
+// ===== ダウン（アーツのダメージでホロメンが倒れたとき）：ライフを1枚、手札の横のホルダーに移す =====
+export function loseLifeToHolder(state: PlayState, side: Side): { state: PlayState; moved: boolean; remaining: number } {
+  const life = state[zoneId(side, 'life')]
+  const top = life[life.length - 1]
+  if (!top) return { state, moved: false, remaining: 0 }
+  return { state: moveCard(state, top.uid, zoneId(side, 'handHolder')), moved: true, remaining: life.length - 1 }
+}

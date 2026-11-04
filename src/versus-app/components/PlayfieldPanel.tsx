@@ -26,6 +26,7 @@ import {
   attachYellFromDeck,
   compactBacks,
   HAND_SIZE,
+  loseLifeToHolder,
   artPayable,
   attackTargetZones,
   calcArtDamage,
@@ -557,7 +558,8 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
 
   // base：カウンターを別のカードから移すとき、外したあとの盤面から計算する
   // note：アーツのダメージの内訳など、メッセージの頭に付ける文（省くと、付けない）
-  const damageUnit = (zone: ZoneId, delta: number, base: PlayState = state, note = '') => {
+  // lifeLoss：アーツのダメージでダウンしたとき、ダウンした側のライフを1枚、ホルダーに移す
+  const damageUnit = (zone: ZoneId, delta: number, base: PlayState = state, note = '', lifeLoss = false) => {
     const pre = note ? `${note}\n` : ''
     if (!isDamageableZone(base, zone)) {
       setMessage('ダメージを与えられるのは、センター・コラボ・バックステージのホロメンです')
@@ -573,8 +575,16 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
     if (r.defeated) {
       const side = parseZone(zone)?.side ?? 'me'
       pushFx({ kind: 'down', from: zone, to: zoneId(side, 'archive'), card: r.defeated.card })
-      setMessage(`${pre}${name}のHPが0になったため、アーカイブへ送りました`)
       if (selectedUnit?.zone === zone) handleSelect(null)
+      if (lifeLoss) {
+        const lost = loseLifeToHolder(r.state, side)
+        if (lost.moved) {
+          setState(lost.state)
+          setMessage(`${pre}${name}がダウンしました。${side === 'me' ? '自分' : '相手'}のライフを1枚、ホルダーに移しました（残りライフ${lost.remaining}）`)
+          return
+        }
+      }
+      setMessage(`${pre}${name}のHPが0になったため、アーカイブへ送りました`)
       return
     }
     const top = unitParts(r.state[zone]).top
@@ -687,7 +697,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
   }
 
   const handleDeckAction = (action: DeckMenuAction) => {
-    if (!deckMenu) return
+    if (!deckMenu || guardYell()) return
     const { side, kind } = deckMenu
     const deck = zoneId(side, kind) // メニューを開いたのが、デッキかエールデッキか
     const who = side === 'me' ? '自分' : '相手'
@@ -807,7 +817,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
   }
 
   const handleSetupDeck = async () => {
-    if (!deckId) return
+    if (!deckId || guardYell()) return
     if (countCards(state) > 0 && !window.confirm(`${deckSide === 'me' ? '自分' : '相手'}の推し・エールデッキ・デッキを、読み込んだデッキに置き換えます。よろしいですか？`)) return
     try {
       const recipe = await saved.load(deckId)
@@ -831,7 +841,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
   }
 
   const handleDeckToHolder = async () => {
-    if (!deckId) return
+    if (!deckId || guardYell()) return
     try {
       const recipe = await saved.load(deckId)
       setState((s) => addRecipeToHolder(s, recipe))
@@ -993,18 +1003,21 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
 
   const advancePhase = (phase: TurnPhase) => setTurn({ ...turnRef.current, phase })
 
+  // エールステップ：エールをつけるまでは、ほかの操作（カードの移動・選択・カウンター・デッキメニュー・戻る など）は、できない。
+  // エールデッキが空・ステージにホロメンがいないときは、エールステップが自動で飛ばされるので、ロックしない
+  const yellLock = canAct && turn.phase === 'yell' && state[zoneId(stepSide, 'yellDeck')].length > 0 && yellTargetZones(state, stepSide).length > 0
+  const YELL_LOCK_MSG = 'エールステップ中です。先に、エールをつけるホロメンを選んでください'
+  const guardYell = (): boolean => {
+    if (yellLock) setMessage(YELL_LOCK_MSG)
+    return yellLock
+  }
+
   // ドローステップ：1枚引いて、エールステップへ
   const handleDrawStep = () => {
     if (turnRef.current.phase !== 'draw') return // 続けて2回押されても、1枚だけ引く
     if (stateRef.current[zoneId(stepSide, 'deck')].length === 0) setMessage('デッキにカードがありません。ドローせずに進みます')
     else draw(stepSide, 1)
     advancePhase('yell')
-  }
-
-  // エールステップを飛ばす
-  const skipYell = () => {
-    setMessage('エールステップを飛ばしました。メインステップです')
-    advancePhase('main')
   }
 
   // エールデッキが空・ステージにホロメンがいないときは、エールステップを自動で飛ばす
@@ -1022,6 +1035,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
 
   // カウンター（ダメージ・パワーアップ・最大HP）：タップ・クリックで選んで、つけ先を、ステージで選ぶ（もう一度タップすると、選ぶのをやめる）
   const handleCounterTap = (kind: 'damage' | 'power' | 'hp', amount: number) => {
+    if (guardYell()) return
     if (pendingChip?.kind === kind && pendingChip.amount === amount) {
       setPendingChip(null)
       return
@@ -1047,9 +1061,15 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
     } else if (act === 'toCenter') {
       setState((s) => moveUnit(s, zone, zoneId(side, 'center')))
       setMessage(`${name}を、センターに移しました`)
+    } else if (act === 'restBack') {
+      // おやすみにして、空いているバック（バック1から順）に、自動で移す
+      const dest = emptyBackZones(stateRef.current, side, zone)[0]
+      if (!dest) return setMessage('バックに、空いている枠がありません')
+      setState((s) => setUnitRest(moveUnit(s, zone, dest), dest, true))
+      setMessage(`${name}を、おやすみにして、${zoneLabel(dest)}に移しました`)
     } else {
       if (emptyBackZones(stateRef.current, side, zone).length === 0) return setMessage('バックに、空いている枠がありません')
-      setResetMove({ from: zone, rest: act === 'restBack' })
+      setResetMove({ from: zone, rest: false })
       setMessage(`${name}を移す、バックの空き枠を、クリック（タップ）してください`)
     }
   }
@@ -1120,7 +1140,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
     }
     // 矢印が相手に届くころに、ダメージが入る（相手の画面にも、矢印を出す）
     pushFx({ kind: 'attack', from, to: zone, amount: r.total }, true, 900)
-    window.setTimeout(() => damageUnit(zone, r.total, stateRef.current, note), 480)
+    window.setTimeout(() => damageUnit(zone, r.total, stateRef.current, note, true), 480)
   }
 
   // 枠を選ばせるモード（盤面の、光る枠）
@@ -1168,7 +1188,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
               ],
             }
         : turn.phase === 'yell'
-          ? { text: 'エールステップ：エールデッキの上の1枚を、つけるホロメンをクリック（タップ）してください', actions: [{ label: 'スキップ', run: skipYell }] }
+          ? { text: 'エールステップ：エールデッキの上の1枚を、つけるホロメンをクリック（タップ）してください（つけるまで、ほかの操作はできません）' }
           : turn.phase === 'performance'
             ? attack
               ? { text: attackTargetZones(state, stepOther).length > 0 ? `「${attack.art.name || 'アーツ'}」でダメージを与える相手（コラボ・センター・バック）を、クリック（タップ）してください` : '相手のステージにホロメンがいません', actions: [{ label: 'やめる', run: () => setAttack(null) }] }
@@ -1245,7 +1265,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
 
   // 先攻・後攻を入れ替える
   const toggleFirst = () => {
-    if (versus?.prep) return // 対戦の準備中は、先攻・後攻を、入れ替えられない
+    if (versus?.prep || guardYell()) return // 対戦の準備中は、先攻・後攻を、入れ替えられない
     const t = turnRef.current
     const first: Side = t.first === 'me' ? 'opp' : 'me'
     // 先攻になった人が1、後攻になった人が0。先攻が、ターンを進める側になる
@@ -1254,6 +1274,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
 
   // RESET：自分の（ひとりのときは、両方の）カードを、デッキ・エールデッキに戻して、シャッフルして、推しのライフ分をライフに置く（初期状態）
   const resetAll = async () => {
+    if (guardYell()) return
     const sides: Side[] = versus ? ['me'] : ['me', 'opp']
     const who = versus ? '自分' : '自分と相手'
     if (!window.confirm(`${who}のカードを、すべてデッキ・エールデッキに戻して、初期状態に戻します（推しは、そのまま）。ターン数も、最初に戻ります。よろしいですか？`)) return
@@ -1431,7 +1452,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
   type BoardHandlers = Pick<BoardProps, 'onTurnChange' | 'onToggleFirst' | 'onHandReturnAll' | 'onHandSort' | 'onInspect' | 'onToggleSkill' | 'onDragStart' | 'onDeckMenu' | 'onTouchDragStart' | 'onDragEnd' | 'onDragOverZone' | 'onDropZone' | 'onZoneTap' | 'onSelect' | 'onToggleRest' | 'onFlip' | 'onPreview' | 'onOpenZone' | 'onPickZone'>
   const boardHandlers = useRef<BoardHandlers | null>(null)
   useEffect(() => {
-    boardHandlers.current = {
+    const handlers: BoardHandlers = {
       onTurnChange: handleTurnChange,
       onToggleFirst: toggleFirst,
       onHandReturnAll: handleHandReturnAll,
@@ -1461,6 +1482,11 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
       },
       onPickZone: handlePickZone,
     }
+    // エールステップ中は、エールをつける操作（onPickZone）と、カードの確認（onPreview・onInspect）だけ、できる
+    const blocked = () => setMessage(YELL_LOCK_MSG)
+    boardHandlers.current = yellLock
+      ? { ...handlers, onToggleFirst: blocked, onHandReturnAll: blocked, onHandSort: blocked, onToggleSkill: blocked, onDragStart: () => {}, onTouchDragStart: () => {}, onDeckMenu: blocked, onDropZone: blocked, onZoneTap: blocked, onSelect: () => {}, onToggleRest: blocked, onFlip: blocked, onOpenZone: blocked }
+      : handlers
   })
   const stableBoardHandlers = useMemo<BoardHandlers>(
     () => ({
@@ -1565,6 +1591,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
 
   // 戻る：直前の操作を取り消す（UNDO_LIMIT 回前まで）
   const undo = () => {
+    if (guardYell()) return
     const snap = historyRef.current[historyRef.current.length - 1]
     if (!snap) return
     historyRef.current = historyRef.current.slice(0, -1)
@@ -1779,13 +1806,14 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
               anchorZone={resetMenu}
               title={top.card.card_name}
               subtitle={`リセットステップ${top.rested ? '（おやすみ中）' : ''}`}
+              thumb={top.card.image_url}
               onClose={() => setResetMenu(null)}
               actions={[
                 { id: 'rest', label: 'おやすみ', hint: 'カードを横向き（おやすみ）にします', disabled: !!top.rested, onSelect: () => resetAction(resetMenu, 'rest') },
                 ...(top.rested ? [{ id: 'wake', label: 'アクティブにする', hint: '縦向きに戻します', onSelect: () => resetAction(resetMenu, 'wake') }] : []),
                 ...(front
                   ? [
-                      { id: 'restBack', label: 'おやすみ＆バック移動', hint: 'おやすみにして、バックの空き枠に移します', onSelect: () => resetAction(resetMenu, 'restBack') },
+                      { id: 'restBack', label: 'おやすみ＆バック移動', hint: 'おやすみにして、空いているバックに、自動で移します', onSelect: () => resetAction(resetMenu, 'restBack') },
                       { id: 'back', label: 'バック移動', hint: 'そのままの向きで、バックの空き枠に移します', onSelect: () => resetAction(resetMenu, 'back') },
                     ]
                   : []),
@@ -1795,8 +1823,11 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
           )
         })()}
       {/* 対戦の準備（デッキをセット・じゃんけん・先攻後攻・手札とマリガン・準備完了） */}
-      {prep && (
+      {prep && versus && (
         <PrepFlow
+          roomCode={versus.roomCode}
+          shareUrl={versus.shareUrl}
+          onLeave={versus.onLeave}
           prep={prep}
           oppName={oppDisplayName}
           deckSelect={saved.decks.length === 0 ? <p className="text-xs text-[#ffcf8a]">読み込めるデッキがありません。ログインして、デッキを作ってから、ここで読み込めます</p> : deckSelectEl}

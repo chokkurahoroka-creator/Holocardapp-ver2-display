@@ -1,5 +1,5 @@
 // このファイルは、管理画面（horoka-admin）から、同期したコピーです。直接は、直さないでください（node scripts/sync-versus.mjs で、上書きされます）。直すときは、管理画面側のファイルを直して、同期してください。
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { mulliganDrawCount, preparingSide, HAND_SIZE, type PrepState, type Side } from '../utils/playfield'
 
@@ -36,26 +36,59 @@ export type PrepFlowProps = {
   onDraw: () => void
   onMulligan: () => void
   onReady: () => void
+  // ルーム（相手を待っている間も、招待URLのコピーと、退出ができるように）
+  roomCode: string
+  shareUrl: string
+  onLeave: () => void
 }
 
-const Backdrop = ({ children, label }: { children: ReactNode; label: string }) =>
+// 画面いっぱいの準備の画面でも、ルームの「招待URLをコピー」と「退出」は、いつでも押せる
+function RoomControls({ roomCode, shareUrl, onLeave }: { roomCode: string; shareUrl: string; onLeave: () => void }) {
+  const [copied, setCopied] = useState(false)
+  const copy = () => {
+    void navigator.clipboard?.writeText(shareUrl).then(() => {
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1800)
+    })
+  }
+  return (
+    <div className="fixed left-2 z-[101] flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-[#4ce0e6]/60 bg-[#061217]/95 px-2.5 py-1.5 text-[12px] text-[#d7eef2] shadow-lg" style={{ top: 'calc(8px + env(safe-area-inset-top, 0px))' }}>
+      <span className="hud-mono font-bold tracking-widest text-[#4ce0e6]">{roomCode}</span>
+      <button type="button" className="underline text-[#9fc3ca]" onClick={copy}>
+        {copied ? 'コピーしました' : '招待URLをコピー'}
+      </button>
+      <button
+        type="button"
+        className="text-[#ff8a8a]"
+        onClick={() => {
+          if (window.confirm('ルームを退出しますか？（ホストが退出すると、ルームは閉じられます）')) onLeave()
+        }}
+      >
+        退出
+      </button>
+    </div>
+  )
+}
+
+const Backdrop = ({ children, label, room }: { children: ReactNode; label: string; room: { roomCode: string; shareUrl: string; onLeave: () => void } }) =>
   createPortal(
     <div role="dialog" aria-modal="true" aria-label={label} className="fixed inset-0 z-[100] grid place-items-center overflow-y-auto bg-[#020a0f]/90 p-4">
-      {children}
+      <RoomControls {...room} />
+      <div className="w-full pt-10">{children}</div>
     </div>,
     document.body
   )
 
 const Card = ({ step, title, children }: { step: string; title: string; children: ReactNode }) => (
-  <div className="hud-panel w-full max-w-md p-5 text-center" style={{ background: 'var(--hud-bg, #061217)' }}>
+  <div className="hud-panel mx-auto w-full max-w-md p-5 text-center" style={{ background: 'var(--hud-bg, #061217)' }}>
     <p className="hud-mono text-[11px] font-bold tracking-[0.4em] text-[#4ce0e6]">{step}</p>
     <h2 className="hud-font mb-3 mt-1 text-xl font-extrabold text-white">{title}</h2>
     {children}
   </div>
 )
 
-const Waiting = ({ text, sub }: { text: string; sub?: string }) => (
-  <Backdrop label={text}>
+const Waiting = ({ text, sub, room }: { text: string; sub?: string; room: { roomCode: string; shareUrl: string; onLeave: () => void } }) => (
+  <Backdrop label={text} room={room}>
     <div className="text-center">
       <p className="text-3xl font-extrabold text-white sm:text-4xl" style={{ textShadow: '0 0 18px #4ce0e6' }}>
         {text}
@@ -67,14 +100,15 @@ const Waiting = ({ text, sub }: { text: string; sub?: string }) => (
 
 export function PrepFlow(p: PrepFlowProps) {
   const { prep } = p
+  const room = { roomCode: p.roomCode, shareUrl: p.shareUrl, onLeave: p.onLeave }
   const who = preparingSide(prep)
   const firstLabel = (s: Side) => (prep.first === s ? '先攻' : '後攻')
 
   // ---- 1 デッキ ----
   if (prep.step === 'deck') {
-    if (prep.deck.me) return <Waiting text="デッキをセットしました" sub={`${p.oppName}が、デッキをセットするのを待っています…`} />
+    if (prep.deck.me) return <Waiting room={room} text="デッキをセットしました" sub={`${p.oppName}が、デッキをセットするのを待っています…`} />
     return (
-      <Backdrop label="デッキをセット">
+      <Backdrop label="デッキをセット" room={room}>
         <Card step="対戦の準備 1/4" title="デッキをセット">
           {!p.deckListReady ? <p className="text-sm text-[#9fc3ca]">デッキを読み込んでいます…</p> : <div className="mb-3 flex justify-center">{p.deckSelect}</div>}
           <div className="flex flex-wrap justify-center gap-2">
@@ -94,7 +128,7 @@ export function PrepFlow(p: PrepFlowProps) {
   // ---- 2 じゃんけん ----
   if (prep.step === 'janken') {
     return (
-      <Backdrop label="じゃんけん">
+      <Backdrop label="じゃんけん" room={room}>
         <Card step="対戦の準備 2/4" title="じゃんけん">
           <p className="mb-3 text-sm text-[#d7eef2]">勝った人が、先攻・後攻を決めます。互いが手を出すと、結果が出ます。</p>
           <div className="mb-3 flex justify-center gap-3">
@@ -117,9 +151,9 @@ export function PrepFlow(p: PrepFlowProps) {
 
   // ---- 3 先攻・後攻を決める ----
   if (prep.step === 'choose') {
-    if (prep.jankenWinner !== 'me') return <Waiting text={`${p.oppName}が、先攻・後攻を選んでいます…`} />
+    if (prep.jankenWinner !== 'me') return <Waiting room={room} text={`${p.oppName}が、先攻・後攻を選んでいます…`} />
     return (
-      <Backdrop label="先攻・後攻を決める">
+      <Backdrop label="先攻・後攻を決める" room={room}>
         <Card step="対戦の準備 3/4" title="じゃんけんに勝ちました！">
           <p className="mb-3 text-sm text-[#d7eef2]">先攻・後攻を選んでください。</p>
           <div className="flex justify-center gap-3">
@@ -136,7 +170,7 @@ export function PrepFlow(p: PrepFlowProps) {
   }
 
   // ---- 4・5 先攻・後攻の準備 ----
-  if (who !== 'me') return <Waiting text={`${firstLabel(who ?? 'opp') === '先攻' ? '先攻' : '後攻'}プレイヤー準備中`} />
+  if (who !== 'me') return <Waiting room={room} text={`${firstLabel(who ?? 'opp') === '先攻' ? '先攻' : '後攻'}プレイヤー準備中`} />
 
   const drawn = prep.drawn.me
   const times = prep.mulligan.me
