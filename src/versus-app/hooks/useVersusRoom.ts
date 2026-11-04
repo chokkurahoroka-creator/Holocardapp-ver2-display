@@ -198,7 +198,7 @@ export function useVersusRoom() {
     else if (payload.kind === 'janken') setLastEvent({ id, kind: 'janken', hand: payload.hand })
     else if (payload.kind === 'fx') {
       const fx = payload.fx
-      setLastEvent({ id, kind: 'fx', fx: fx.kind === 'shuffle' ? { kind: 'shuffle', zone: swapZoneId(fx.zone) } : fx.kind === 'attack' ? { kind: 'attack', from: swapZoneId(fx.from), to: swapZoneId(fx.to), amount: fx.amount } : { kind: fx.kind, from: swapZoneId(fx.from), to: swapZoneId(fx.to), card: fx.card } })
+      setLastEvent({ id, kind: 'fx', fx: fx.kind === 'shuffle' ? { kind: 'shuffle', zone: swapZoneId(fx.zone) } : fx.kind === 'attack' ? { kind: 'attack', from: swapZoneId(fx.from), to: swapZoneId(fx.to), amount: fx.amount, art: fx.art, parts: fx.parts } : { kind: fx.kind, from: swapZoneId(fx.from), to: swapZoneId(fx.to), card: fx.card } })
     }
   }, [])
 

@@ -102,7 +102,7 @@ export function mergeDocs(remote: WireDoc, mine: WireDoc, mySide: Side): WireDoc
 }
 
 // ===== 相手の画面へ送る出来事（サイコロ・シャッフル・ダウンの演出） =====
-export type RemoteEventInput = { kind: 'dice'; n: number } | { kind: 'janken'; hand: number } | { kind: 'fx'; fx: { kind: 'shuffle'; zone: ZoneId } | { kind: 'down' | 'fly'; from: ZoneId; to: ZoneId; card: DeckCard } | { kind: 'attack'; from: ZoneId; to: ZoneId; amount: number } }
+export type RemoteEventInput = { kind: 'dice'; n: number } | { kind: 'janken'; hand: number } | { kind: 'fx'; fx: { kind: 'shuffle'; zone: ZoneId } | { kind: 'down' | 'fly'; from: ZoneId; to: ZoneId; card: DeckCard } | { kind: 'attack'; from: ZoneId; to: ZoneId; amount: number; art?: string; parts?: string } }
 export type RemoteEvent = RemoteEventInput & { id: number }
 
 // 自分の画面に出ている状態を、ルームへ保存するときの形、その逆

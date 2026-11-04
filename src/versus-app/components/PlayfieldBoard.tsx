@@ -17,7 +17,7 @@ export type DragItem = NonNullable<PlayDrag>
 export type PickState = { zones: ZoneId[]; color: string }
 
 // アニメーション。shuffle: そのゾーンのカードをシャッフルする動き／down: ダメージで倒されたホロメンが、アーカイブへ飛んでいく動き
-export type PlayFxInput = { kind: 'shuffle'; zone: ZoneId } | { kind: 'down' | 'fly'; from: ZoneId; to: ZoneId; card: DeckCard } | { kind: 'bloom'; zone: ZoneId; stage: BloomStage; label: string } | { kind: 'attack'; from: ZoneId; to: ZoneId; amount: number } | { kind: 'hit'; zone: ZoneId; amount: number } // attack：アーツの攻撃（矢印とダメージが、攻撃する枠から、相手の枠へ飛ぶ。相手の画面にも送る）／hit：ダメージを受けた枠の、演出（盤面の変化から、それぞれの画面で出す）／ bloom：ブルームした枠の、演出（相手の画面へは送らない。それぞれの画面で、盤面の変化から出す） // fly：カードが、1枚、別のゾーンへ飛んでいく（ホロパワーのアーカイブなど）
+export type PlayFxInput = { kind: 'shuffle'; zone: ZoneId } | { kind: 'down' | 'fly'; from: ZoneId; to: ZoneId; card: DeckCard } | { kind: 'bloom'; zone: ZoneId; stage: BloomStage; label: string } | { kind: 'attack'; from: ZoneId; to: ZoneId; amount: number; art?: string; parts?: string } | { kind: 'hit'; zone: ZoneId; amount: number } // attack：アーツの攻撃（矢印とダメージが、攻撃する枠から、相手の枠へ飛ぶ。相手の画面にも送る）／hit：ダメージを受けた枠の、演出（盤面の変化から、それぞれの画面で出す）／ bloom：ブルームした枠の、演出（相手の画面へは送らない。それぞれの画面で、盤面の変化から出す） // fly：カードが、1枚、別のゾーンへ飛んでいく（ホロパワーのアーカイブなど）
 export type PlayFx = PlayFxInput & { id: number }
 
 const FX_CSS = `

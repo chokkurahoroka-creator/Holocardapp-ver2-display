@@ -1,6 +1,6 @@
 // このファイルは、管理画面（horoka-admin）から、同期したコピーです。直接は、直さないでください（node scripts/sync-versus.mjs で、上書きされます）。直すときは、管理画面側のファイルを直して、同期してください。
 import { Fragment, memo } from 'react'
-import { LOG_MARK, type LogTier, type PlayLogEntry, type PlayLogTone } from '../utils/playLog'
+import { LOG_MARK, type LogThumb, type LogTier, type PlayLogEntry, type PlayLogTone } from '../utils/playLog'
 
 // 枠の色：パワー関係＝紫、エール関係＝水色、ダメージ関係＝赤、シャッフル＝青（薄く出す）
 const TONE_COLOR: Record<PlayLogTone, string> = { power: '#a855f7', yell: '#38bdf8', damage: '#ef4444', shuffle: '#3b66ff' }
@@ -38,6 +38,23 @@ function Emphasized({ text }: { text: string }) {
   )
 }
 
+// ログの文字の右側に出す、そのログのカード（小さな画像。最大3枚）
+function Thumbs({ thumbs }: { thumbs: LogThumb[] }) {
+  return (
+    <span className="ml-auto flex shrink-0 items-start gap-1 pl-1">
+      {thumbs.slice(0, 3).map((t, i) =>
+        t.img ? (
+          <img key={`${t.id}-${i}`} src={t.img} alt={t.name} title={t.name} loading="lazy" draggable={false} className="rounded-[3px] object-cover" style={{ width: 30, height: 42, border: '1px solid rgba(255,255,255,0.3)' }} />
+        ) : (
+          <span key={`${t.id}-${i}`} title={t.name} className="grid place-items-center rounded-[3px] bg-[#26324f] text-[8px] text-white" style={{ width: 30, height: 42 }}>
+            ?
+          </span>
+        )
+      )}
+    </span>
+  )
+}
+
 // プレイログ：何が起きたかを、新しい順に並べる（いちばん上が、最新）。PCでは、フィールドの左横に縦長で、スマホでは、ボタンで開いて出す
 export const PlayLogPanel = memo(function PlayLogPanel({ entries, onClear, className = '' }: { entries: PlayLogEntry[]; onClear: () => void; className?: string }) {
   const list = [...entries].reverse()
@@ -54,7 +71,12 @@ export const PlayLogPanel = memo(function PlayLogPanel({ entries, onClear, class
       ) : (
         <ul className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pr-1">
           {list.map((e) =>
-            e.kind === 'turn' ? (
+            e.kind === 'step' ? (
+              <li key={e.id} className="flex items-center gap-1.5 rounded px-2 py-0.5 text-xs font-bold" style={{ background: e.side === 'me' ? 'rgba(76,224,230,0.1)' : 'rgba(255,112,102,0.1)', color: e.side === 'me' ? '#4ce0e6' : '#ff9a92' }}>
+                <span aria-hidden="true">▶</span>
+                {e.text}
+              </li>
+            ) : e.kind === 'turn' ? (
               <li key={e.id} className="mt-1 rounded-md border-2 border-[#ffd76a]/60 bg-[#ffd76a]/10 px-2 py-1.5 text-center text-sm font-bold text-[#ffd76a]">
                 <Emphasized text={e.text} />
               </li>
@@ -73,9 +95,10 @@ export const PlayLogPanel = memo(function PlayLogPanel({ entries, onClear, class
                 >
                   {e.side === 'me' ? '自分' : '相手'}
                 </span>
-                <span className="min-w-0 whitespace-pre-line break-words">
+                <span className="min-w-0 flex-1 whitespace-pre-line break-words">
                   <Emphasized text={e.text} />
                 </span>
+                {e.thumbs && e.thumbs.length > 0 && <Thumbs thumbs={e.thumbs} />}
               </li>
             )
           )}

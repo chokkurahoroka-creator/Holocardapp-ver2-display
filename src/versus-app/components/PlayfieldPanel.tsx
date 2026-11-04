@@ -106,11 +106,17 @@ import { SupportCastOverlay, type SupportCast } from './SupportCastOverlay'
 import { parseAttribute } from '../utils/attribute'
 import type { ArtRow } from '../types/artsSkills'
 import { winnerByLife } from '../utils/victory'
-import { PLAY_LOG_LIMIT, diffPlayLog, diffSkillLog, diffTurnLog, type PlayLogDraft, type PlayLogEntry } from '../utils/playLog'
+import { PLAY_LOG_LIMIT, cardLabel, diffPlayLog, diffSkillLog, diffTurnLog, logThumb, type PlayLogDraft, type PlayLogEntry } from '../utils/playLog'
 
 const STORAGE_KEY = 'horoka-admin:playfield:v1'
 const UNDO_LIMIT = 3 // 戻るボタンで、何回前まで巻き戻せるか
 type Snapshot = { state: PlayState; skill: Record<string, boolean>; turn: TurnState }
+const LAYOUT_KEY = 'horoka:pf-layout' // PC画面の、列の幅の記録
+const LOG_W_DEFAULT = 480
+const LOG_W_MIN = 220
+const LOG_W_MAX = 900
+const BOARD_W_MIN = 360
+const BOARD_W_MAX = 1500
 const SKILL_KEY = 'horoka-admin:playfield:skills:v1'
 const TURN_KEY = 'horoka-admin:playfield:turn:v1'
 const ZOOM_KEY = 'horoka-admin:playfield:zoom'
@@ -549,6 +555,15 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
     const id = ++fxSeq.current
     setFxList((l) => [...l, { ...fx, id }])
     window.setTimeout(() => setFxList((l) => l.filter((f) => f.id !== id)), ms)
+    // アーツ攻撃は、ログにも残す：「攻撃したカードの、アーツ名 → 攻撃されたカード」と、ダメージ（内訳つき）
+    if (fx.kind === 'attack') {
+      const atk = unitParts(stateRef.current[fx.from]).top
+      const tgt = unitParts(stateRef.current[fx.to]).top
+      const side = parseZone(fx.from)?.side
+      if (atk && tgt && side) {
+        pushLog([{ side, kind: 'attack', tone: 'damage', text: `${cardLabel(atk.card)}の「${fx.art || 'アーツ'}」\n→ ${cardLabel(tgt.card)}に${fx.amount}ダメージ${fx.parts ? `（${fx.parts}）` : ''}`, thumbs: [logThumb(atk.card), logThumb(tgt.card)] }])
+      }
+    }
   }
   // シャッフル（動きつき）
   const shuffle = (zone: ZoneId) => {
@@ -1139,7 +1154,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
       return
     }
     // 矢印が相手に届くころに、ダメージが入る（相手の画面にも、矢印を出す）
-    pushFx({ kind: 'attack', from, to: zone, amount: r.total }, true, 900)
+    pushFx({ kind: 'attack', from, to: zone, amount: r.total, art: attack.art.name || 'アーツ', parts: parts.join('、') }, true, 900)
     window.setTimeout(() => damageUnit(zone, r.total, stateRef.current, note, true), 480)
   }
 
@@ -1375,7 +1390,32 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
   // 盤面の大きさ：PCは、既定で全体が画面に収まる大きさ。タッチ端末（スマホ）は、横幅に合わせる
   // 画面の上のバー・見出し・余白の分（約250px）を引いた高さに、盤面全体を収める
   const fitHeight = !isTouch && zoom === 'fit' ? Math.max(380, viewportH - (fullscreen ? 20 : 250)) : undefined
-  const boardCol = fitHeight ? `${Math.min(900, Math.round(HALF_W * (fitHeight / MAT_H)) + 28)}px` : 'minmax(0, 1fr)'
+  const boardColAuto = fitHeight ? `${Math.min(900, Math.round(HALF_W * (fitHeight / MAT_H)) + 28)}px` : 'minmax(0, 1fr)'
+
+  // PC画面の列の幅（プレイログの幅・盤面の幅）。スプリッターで変えると、この端末に記録されて、次回も同じ幅になる
+  const [layout, setLayout] = useState<{ logW: number; boardW: number | null }>(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? 'null') as { logW?: unknown; boardW?: unknown } | null
+      const logW = typeof v?.logW === 'number' ? Math.min(LOG_W_MAX, Math.max(LOG_W_MIN, v.logW)) : LOG_W_DEFAULT
+      const boardW = typeof v?.boardW === 'number' ? Math.min(BOARD_W_MAX, Math.max(BOARD_W_MIN, v.boardW)) : null
+      return { logW, boardW }
+    } catch {
+      return { logW: LOG_W_DEFAULT, boardW: null }
+    }
+  })
+  useEffect(() => {
+    try {
+      localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout))
+    } catch {
+      /* 記録できなくても、そのまま続ける */
+    }
+  }, [layout])
+  const boardCol = layout.boardW !== null ? `${layout.boardW}px` : boardColAuto
+  const boardSectionRef = useRef<HTMLElement>(null)
+  const dragBase = useRef(0)
+  const clampLog = (w: number) => Math.min(LOG_W_MAX, Math.max(LOG_W_MIN, Math.round(w)))
+  const clampBoard = (w: number) => Math.min(BOARD_W_MAX, Math.max(BOARD_W_MIN, Math.round(w)))
+  const boardNow = () => boardSectionRef.current?.getBoundingClientRect().width ?? 600
 
   // プレイログ：盤面・ターン・推しスキルが変わるたびに、前との差から、何が起きたかを記録する（相手の操作も、同じ差分から記録される）
   const [playLog, setPlayLog] = useState<PlayLogEntry[]>([])
@@ -1431,21 +1471,42 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
   const myDisplayName = versus ? versus.myName : '自分'
   const oppDisplayName = versus ? versus.oppName : '相手'
 
-  // ターンチェンジの演出：ターンが1つ進んで、ターンを進める側が替わったときだけ、右から現れて、中央で止まって、左へ消える帯を出す
-  // （先攻・後攻の入れ替えや、読み込みでの大きな変化では、出さない。「動きを減らす」設定のときも、出さない）
-  const [turnBanner, setTurnBanner] = useState<{ id: number; side: Side; title: string; sub: string } | null>(null)
+  // ターンチェンジ・ステップ推移の演出：右から現れて、中央で止まって、左へ消える帯。
+  //   ターンチェンジ → リセットステップ → ドローステップ → エールステップ → メインステップ → パフォーマンスステップ の順に、1つずつ出す（重なったときは、順番待ち）。
+  //   ターンチェンジの帯は、ターンが1つ進んで、ターンを進める側が替わったときだけ（先攻・後攻の入れ替えや、読み込みでの大きな変化では、出さない）。
+  //   「動きを減らす」設定のときは、出さない
+  type Banner = { id: number; side: Side; label: string; title: string; sub: string; fast: boolean; step: boolean }
+  const [bannerQueue, setBannerQueue] = useState<Banner[]>([])
   const bannerPrev = useRef(turn)
   const bannerSeq = useRef(0)
+  const STEP_BANNER: Record<TurnPhase, [string, string]> = { reset: ['RESET STEP', 'リセットステップ'], draw: ['DRAW STEP', 'ドローステップ'], yell: ['YELL STEP', 'エールステップ'], main: ['MAIN STEP', 'メインステップ'], performance: ['PERFORMANCE STEP', 'パフォーマンスステップ'] }
   useEffect(() => {
     const prev = bannerPrev.current
     bannerPrev.current = turn
-    if (prev === turn || prev.active === turn.active) return
-    if (turn.me + turn.opp - (prev.me + prev.opp) !== 1) return
+    if (prev === turn) return
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
     const who = turn.active === 'me' ? myDisplayName : oppDisplayName
-    setTurnBanner({ id: ++bannerSeq.current, side: turn.active, title: `${who}のターン`, sub: `${turn[turn.active]}ターン目` })
+    const added: Banner[] = []
+    const turnChange = prev.active !== turn.active && turn.me + turn.opp - (prev.me + prev.opp) === 1
+    const firstTurnStart = prev.phase === 'main' && turn.phase === 'draw' && prev.me + prev.opp === 1 && turn.me + turn.opp === 1 // 対戦の準備が終わって、最初のターンが始まった
+    const stepChange = prev.phase !== turn.phase && (turnChange || firstTurnStart || (prev.active === turn.active && prev.me === turn.me && prev.opp === turn.opp))
+    if (turnChange) added.push({ id: ++bannerSeq.current, side: turn.active, label: 'TURN CHANGE', title: `${who}のターン`, sub: `${turn[turn.active]}ターン目`, fast: false, step: false })
+    else if (firstTurnStart) added.push({ id: ++bannerSeq.current, side: turn.active, label: 'TURN START', title: `${who}のターン`, sub: `${turn[turn.active]}ターン目`, fast: false, step: false })
+    if (stepChange || turnChange) {
+      const [label, title] = STEP_BANNER[turn.phase]
+      added.push({ id: ++bannerSeq.current, side: turn.active, label, title, sub: `${who}のターン`, fast: true, step: true })
+    }
+    if (added.length === 0) return
+    // ステップの帯は、順番待ちの間に、何度も進んだときは、古い待ちを捨てる（いまの1つだけ、あとに出す）
+    setBannerQueue((q) => {
+      const [head, ...rest] = q
+      const keep = rest.filter((b) => !b.step || added.every((a) => !a.step))
+      return [...(head ? [head] : []), ...keep, ...added].slice(0, 6)
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [turn, myDisplayName, oppDisplayName])
-  const closeTurnBanner = useCallback(() => setTurnBanner(null), [])
+  const closeTurnBanner = useCallback(() => setBannerQueue((q) => q.slice(1)), [])
+  const turnBanner = bannerQueue[0] ?? null
 
   // 盤面（PlayfieldBoard）へ渡す処理。盤面は、データが変わったときだけ描き直す（メモ化）ので、渡す関数は変わらないものにして、
   // 呼ばれたときに、そのときの最新の処理（boardHandlers.current）を呼ぶ。これで、古い盤面を見た処理が呼ばれることはない
@@ -1847,7 +1908,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
           onReady={handlePrepReady}
         />
       )}
-      {turnBanner && <TurnChangeBanner key={turnBanner.id} side={turnBanner.side} title={turnBanner.title} sub={turnBanner.sub} onDone={closeTurnBanner} />}
+      {turnBanner && <TurnChangeBanner key={turnBanner.id} side={turnBanner.side} label={turnBanner.label} title={turnBanner.title} sub={turnBanner.sub} fast={turnBanner.fast} onDone={closeTurnBanner} />}
       {winner && (
         <VictoryModal
           name={winner === 'me' ? myDisplayName : oppDisplayName}
@@ -1944,20 +2005,34 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
         </button>
         )}
       </div>
-      <div className={`grid grid-cols-1 ${fullscreen ? 'gap-2' : 'gap-4'} xl:items-start ${isTouch ? 'xl:grid-cols-[var(--pf-board-col)_92px_minmax(0,1fr)]' : 'xl:grid-cols-[480px_var(--pf-board-col)_156px_minmax(0,1fr)]'}`} style={{ '--pf-board-col': boardCol } as CSSProperties}>
+      <div className={`grid grid-cols-1 ${fullscreen ? 'gap-2' : 'gap-4'} xl:items-start ${isTouch ? 'xl:grid-cols-[var(--pf-board-col)_92px_minmax(0,1fr)]' : 'xl:gap-x-0 xl:grid-cols-[var(--pf-log-col)_16px_var(--pf-board-col)_16px_156px_16px_minmax(0,1fr)]'}`} style={{ '--pf-board-col': boardCol, '--pf-log-col': `${layout.logW}px` } as CSSProperties}>
         {/* プレイログ（PC）：フィールドの左横に、縦長で置く（狭い画面では、いちばん下） */}
         {!isTouch && (
           <div className="order-last h-72 min-w-0 xl:order-first xl:sticky xl:top-2 xl:h-[calc(100dvh-110px)] xl:self-start">
             <PlayLogPanel entries={playLog} onClear={clearPlayLog} className="h-full" />
           </div>
         )}
+        {!isTouch && (
+          <ColumnSplitter
+            label="プレイログの幅"
+            onStart={() => (dragBase.current = layout.logW)}
+            onMove={(dx) => setLayout((l) => ({ ...l, logW: clampLog(dragBase.current + dx) }))}
+            onNudge={(d) => setLayout((l) => ({ ...l, logW: clampLog(l.logW + d) }))}
+            onReset={() => setLayout((l) => ({ ...l, logW: LOG_W_DEFAULT }))}
+          />
+        )}
         {/* プレイマット */}
-        <section className={fullscreen ? 'hud-panel hud-panel-flat p-0.5 min-w-0' : 'hud-panel hud-panel-flat p-2 sm:p-3 min-w-0'}>
+        <section ref={boardSectionRef} className={fullscreen ? 'hud-panel hud-panel-flat p-0.5 min-w-0' : 'hud-panel hud-panel-flat p-2 sm:p-3 min-w-0'}>
           {!fullscreen && (
             <>
           <div className="flex flex-wrap items-center gap-2 mb-2 px-1">
             <h3 className="hud-font text-white text-sm font-bold">プレイフィールド</h3>
             <div className="ml-auto flex flex-wrap gap-2">
+              {!isTouch && (
+                <button type="button" className="btn-secondary !px-2 !py-1 text-xs" onClick={() => setLayout({ logW: LOG_W_DEFAULT, boardW: null })} title="列の幅（プレイログ・プレイフィールド）を、初期の幅に戻します。列の間の仕切りを、ドラッグして調整できます" disabled={layout.logW === LOG_W_DEFAULT && layout.boardW === null}>
+                  列の幅を初期化
+                </button>
+              )}
               {!isTouch && (
                 <div className="inline-flex rounded border border-[#2a4a52] overflow-hidden" role="group" aria-label="盤面の表示サイズ">
                   {(
@@ -2015,6 +2090,15 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
             {...stableBoardHandlers}
           />
         </section>
+        {!isTouch && (
+          <ColumnSplitter
+            label="プレイフィールドの幅"
+            onStart={() => (dragBase.current = boardNow())}
+            onMove={(dx) => setLayout((l) => ({ ...l, boardW: clampBoard(dragBase.current + dx) }))}
+            onNudge={(d) => setLayout((l) => ({ ...l, boardW: clampBoard((l.boardW ?? boardNow()) + d) }))}
+            onReset={() => setLayout((l) => ({ ...l, boardW: null }))}
+          />
+        )}
 
         {/* ダメージカウンター：プレイフィールドとホルダーの間に、縦長に置く（狭い画面では、盤面の下に横長） */}
         <div className="xl:sticky xl:top-2 xl:self-start xl:h-[calc(100dvh-110px)] min-w-0">
@@ -2044,6 +2128,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
         </div>
 
         {/* プレビュー・ホルダー・デッキ読み込み・検索 */}
+        {!isTouch && <div aria-hidden="true" className="hidden xl:block" />}
         <div className="flex flex-col gap-4 min-w-0 xl:sticky xl:top-2 xl:max-h-[calc(100dvh-110px)] xl:overflow-y-auto xl:pr-1">
           {/* スマホでは、プレビューは出さない（タップしたカードは、下の操作バーで確認する） */}
           {!isTouch && (
@@ -2688,6 +2773,42 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
           </div>,
           document.body
         )}
+    </div>
+  )
+}
+
+// PC画面の、列と列の間の仕切り：ドラッグ（またはキーボードの ← →）で、幅を変えられる。ダブルクリックで、元の幅に戻す
+function ColumnSplitter({ label, onStart, onMove, onNudge, onReset }: { label: string; onStart: () => void; onMove: (dx: number) => void; onNudge: (d: number) => void; onReset: () => void }) {
+  const startX = useRef(0)
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={label}
+      tabIndex={0}
+      title={`${label}：ドラッグで幅を変更（ダブルクリックで元に戻す）`}
+      className="group relative hidden cursor-col-resize select-none touch-none xl:block xl:self-stretch"
+      onPointerDown={(e) => {
+        e.currentTarget.setPointerCapture(e.pointerId)
+        startX.current = e.clientX
+        onStart()
+      }}
+      onPointerMove={(e) => {
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) onMove(e.clientX - startX.current)
+      }}
+      onDoubleClick={onReset}
+      onKeyDown={(e) => {
+        if (e.key === 'ArrowLeft') {
+          e.preventDefault()
+          onNudge(-16)
+        } else if (e.key === 'ArrowRight') {
+          e.preventDefault()
+          onNudge(16)
+        } else if (e.key === 'Home' || e.key === 'Enter') onReset()
+      }}
+    >
+      <span className="absolute inset-y-0 left-1/2 w-[4px] -translate-x-1/2 rounded bg-[#2a4a52] transition-colors group-hover:bg-[#4ce0e6] group-focus-visible:bg-[#4ce0e6] group-active:bg-[#4ce0e6]" />
+      <span aria-hidden="true" className="absolute left-1/2 top-1/2 h-10 w-[8px] -translate-x-1/2 -translate-y-1/2 rounded bg-[#4ce0e6]/70 opacity-0 transition-opacity group-hover:opacity-100" />
     </div>
   )
 }

@@ -5,10 +5,12 @@ import { ZONE_BY_KEY, isYellCard, parseZone, unitDamage, unitHpUp, unitParts, un
 // ===== プレイログ：盤面が変わったときに、前の盤面との差から、何が起きたかを、文にする =====
 // 自分の操作も、相手の操作（対戦中は、ルームから届く盤面）も、同じ差分から作るので、どちらの画面にも、同じログが出る
 
-export type PlayLogKind = 'move' | 'reveal' | 'rest' | 'damage' | 'power' | 'shuffle' | 'turn' | 'skill'
+export type PlayLogKind = 'move' | 'reveal' | 'rest' | 'damage' | 'power' | 'shuffle' | 'turn' | 'skill' | 'step' | 'attack'
 // 枠の色分け：パワー関係（ホロパワー・パワーアップ）＝紫、エール関係＝水色、ダメージ関係＝赤、シャッフル＝青
 export type PlayLogTone = 'power' | 'yell' | 'damage' | 'shuffle'
-export type PlayLogDraft = { side: Side; kind: PlayLogKind; text: string; tone?: PlayLogTone }
+// ログの文字の右側に出す、そのログのカード（小さな画像）
+export type LogThumb = { id: number; name: string; img: string | null }
+export type PlayLogDraft = { side: Side; kind: PlayLogKind; text: string; tone?: PlayLogTone; thumbs?: LogThumb[] }
 export type PlayLogEntry = PlayLogDraft & { id: number }
 
 export const PLAY_LOG_LIMIT = 200 // 残しておくログの数（古いものから消える）
@@ -60,7 +62,9 @@ function stageTier(stage: string | null): LogTier | null {
   return null
 }
 
-function cardLabel(c: DeckCard): string {
+export const logThumb = (c: DeckCard): LogThumb => ({ id: c.id, name: c.card_name, img: c.image_url ?? null })
+
+export function cardLabel(c: DeckCard): string {
   const text = `「${c.stage ? `${c.stage}-${c.card_name}` : c.card_name}」`
   const tier = stageTier(c.stage)
   return tier ? `⟦${tier}:${text}⟧` : text
@@ -85,7 +89,8 @@ function isSingleMove(a: string[], b: string[]): boolean {
   })
 }
 
-type Move = { side: Side; from: string; to: string; names: string[]; count: number; tone?: PlayLogTone }
+// archive：アーカイブへ送ったカード。何枚送っても、ログに出すのは、いちばん上（最後に積まれた）1枚だけ（tops から選ぶ）
+type Move = { side: Side; from: string; to: string; names: string[]; thumbs: LogThumb[]; count: number; tone?: PlayLogTone; archive: boolean; tops: { idx: number; name: string; thumb: LogThumb }[] }
 
 // 移動の色分け：ホロパワー置き場に出入りするカード＝パワー関係、センター・コラボからアーカイブへ行くカード＝赤、エールのカード・エールデッキに出入りするカード＝エール関係
 function moveTone(card: PlayCard, from: ZoneId, to: ZoneId): PlayLogTone | undefined {
@@ -103,7 +108,7 @@ export function diffPlayLog(prev: PlayState, next: PlayState, opts: { conceal: b
   const after = indexCards(next)
 
   const moves = new Map<string, Move>()
-  const reveals = new Map<string, { side: Side; place: string; names: string[] }>()
+  const reveals = new Map<string, { side: Side; place: string; names: string[]; thumbs: LogThumb[] }>()
 
   for (const [uid, a] of after) {
     const b = before.get(uid)
@@ -113,8 +118,9 @@ export function diffPlayLog(prev: PlayState, next: PlayState, opts: { conceal: b
         const side: Side = parseZone(a.zone)?.side ?? 'me'
         const place = placeName(a.zone)
         const key = `${side}|${place}`
-        const g = reveals.get(key) ?? { side, place, names: [] }
+        const g = reveals.get(key) ?? { side, place, names: [], thumbs: [] }
         g.names.push(cardLabel(a.card.card)) // 公開したカードは、相手にも見えるので、名前を出してよい
+        g.thumbs.push(logThumb(a.card.card))
         reveals.set(key, g)
       }
       continue
@@ -128,28 +134,38 @@ export function diffPlayLog(prev: PlayState, next: PlayState, opts: { conceal: b
     const to = pa?.key === 'deck' ? deckPlace(next, a.zone, uid) : placeName(a.zone) // デッキへ戻すときは、トップか、アンダーかも出す
     const tone = moveTone(a.card, b.zone, a.zone)
     const key = `${side}|${from}|${to}|${tone ?? ''}`
-    const g = moves.get(key) ?? { side, from, to, names: [], count: 0, tone }
+    const g = moves.get(key) ?? { side, from, to, names: [], thumbs: [], count: 0, tone, archive: pa?.key === 'archive', tops: [] }
     g.count += 1
     const secret = pb?.key === 'deck' && pa?.key === 'power' // デッキ → パワー（ホロパワーへ置く）は、非公開情報なので、カード名を出さない
-    if (!secret && nameVisible(opts.conceal, side, a.zone, a.card)) g.names.push(cardLabel(a.card.card))
+    if (!secret && nameVisible(opts.conceal, side, a.zone, a.card)) {
+      g.names.push(cardLabel(a.card.card))
+      g.thumbs.push(logThumb(a.card.card))
+      g.tops.push({ idx: next[a.zone].findIndex((c) => c.uid === uid), name: cardLabel(a.card.card), thumb: logThumb(a.card.card) })
+    }
     moves.set(key, g)
   }
 
   const out: PlayLogDraft[] = []
   for (const g of moves.values()) {
+    // 複数枚をアーカイブへ送ったときは、いちばん上のカード（アーカイブの山の、いちばん上）1枚だけを出す
+    if (g.archive && g.tops.length > 1) {
+      const top = g.tops.reduce((a, b) => (b.idx > a.idx ? b : a))
+      g.names = [top.name]
+      g.thumbs = [top.thumb]
+    }
     const route = `${g.from} → ${g.to}`
     // 移動（場所 → 場所）を先に出し、改行して、カード名（1枚ずつ、1行。4枚目からは、枚数）を出す。名前が見えないとき（相手の非公開のカード・デッキ → パワー）は、移動だけ
     const shown = g.names.slice(0, 3)
     const more = g.names.length > 3 ? `\nほか${g.names.length - 3}枚` : ''
     const times = g.count > 1 ? ` ×${g.count}` : ''
     const text = g.names.length === 0 ? `${route}${times}` : `${route}${times}\n${shown.join('\n')}${more}`
-    out.push({ side: g.side, kind: 'move', text, tone: g.tone })
+    out.push({ side: g.side, kind: 'move', text, tone: g.tone, thumbs: g.thumbs.slice(0, 3) })
   }
 
   for (const g of reveals.values()) {
     const shown = g.names.slice(0, 3)
     const more = g.names.length > 3 ? `\nほか${g.names.length - 3}枚` : ''
-    out.push({ side: g.side, kind: 'reveal', text: `${g.place}のカードを公開\n${shown.join('\n')}${more}` })
+    out.push({ side: g.side, kind: 'reveal', text: `${g.place}のカードを公開\n${shown.join('\n')}${more}`, thumbs: g.thumbs.slice(0, 3) })
   }
 
   // 枠（ユニット）ごとの変化：レスト・ダメージは、いちばん上のカード（表に見えているホロメン）の情報で出す
@@ -174,7 +190,7 @@ export function diffPlayLog(prev: PlayState, next: PlayState, opts: { conceal: b
       if (sameCards) {
         const was = pc.some((c) => c.rested)
         const now = nc.some((c) => c.rested)
-        if (was !== now) restDrafts.push({ side: p.side, kind: 'rest', text: `${label}を${now ? 'レストにした' : 'アクティブにした'}` })
+        if (was !== now) restDrafts.push({ side: p.side, kind: 'rest', text: `${label}を${now ? 'レストにした' : 'アクティブにした'}`, thumbs: [logThumb(nTop.card)] })
       }
 
       const dp = unitDamage(pc)
@@ -183,7 +199,7 @@ export function diffPlayLog(prev: PlayState, next: PlayState, opts: { conceal: b
         const base = opts.hpOf(nTop.card)
         const remain = base === null ? '不明' : String(Math.max(0, base + unitHpUp(nc) - dn))
         const text = dn > dp ? `${label}に${dn - dp}ダメージ（残りHP ${remain}）` : `${label}のダメージを${dp - dn}減らした（残りHP ${remain}）`
-        damageDrafts.push({ side: p.side, kind: 'damage', text, tone: 'damage' })
+        damageDrafts.push({ side: p.side, kind: 'damage', text, tone: 'damage', thumbs: [logThumb(nTop.card)] })
       }
 
       // パワーアップカウンター
@@ -191,7 +207,7 @@ export function diffPlayLog(prev: PlayState, next: PlayState, opts: { conceal: b
       const pn = unitPower(nc)
       if (pp !== pn) {
         const text = pn > pp ? `${label}にパワー+${pn - pp}（合計+${pn}）` : `${label}のパワーを${pp - pn}減らした（合計+${pn}）`
-        powerDrafts.push({ side: p.side, kind: 'power', text, tone: 'power' })
+        powerDrafts.push({ side: p.side, kind: 'power', text, tone: 'power', thumbs: [logThumb(nTop.card)] })
       }
       continue
     }
@@ -210,10 +226,16 @@ export function diffPlayLog(prev: PlayState, next: PlayState, opts: { conceal: b
   return [...out, ...shuffleDrafts, ...restDrafts, ...powerDrafts, ...damageDrafts]
 }
 
-// ターンが替わったとき
+// ステップの名前（ログに出す）
+export const STEP_LOG_LABEL: Record<TurnState['phase'], string> = { reset: 'リセットステップ', draw: 'ドローステップ', yell: 'エールステップ', main: 'メインステップ', performance: 'パフォーマンスステップ' }
+
+// ターンが替わったとき（ターンチェンジ）と、ステップが進んだとき（リセット → ドロー → エール → メイン → パフォーマンス）
 export function diffTurnLog(prev: TurnState, next: TurnState): PlayLogDraft[] {
-  if (prev.active === next.active) return []
-  return [{ side: next.active, kind: 'turn', text: `${sideLabel(next.active)}のターン（${next[next.active]}ターン目）` }]
+  const out: PlayLogDraft[] = []
+  const turnChanged = prev.active !== next.active
+  if (turnChanged) out.push({ side: next.active, kind: 'turn', text: `${sideLabel(next.active)}のターン（${next[next.active]}ターン目）` })
+  if (turnChanged || prev.phase !== next.phase) out.push({ side: next.active, kind: 'step', text: STEP_LOG_LABEL[next.phase] })
+  return out
 }
 
 // 推しスキルを使ったとき（キー：me:oshi / me:sp / opp:oshi / opp:sp）。使用済みが、元に戻ったときは、記録しない
