@@ -1188,28 +1188,30 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
 
   // 画面の上に出す、いまのステップの案内
   type PromptAction = { label: string; run: () => void }
-  const stepPrompt: { text: string; actions?: PromptAction[] } | null = pendingChip
-    ? { text: `${pendingChip.kind === 'damage' ? 'ダメージ' : pendingChip.kind === 'power' ? 'パワーアップ' : '最大HP'} +${pendingChip.amount}：つけるホロメンを、ステージでクリック（タップ）してください`, actions: [{ label: 'やめる', run: () => setPendingChip(null) }] }
+  // 画面に出す案内は短く。くわしい説明は、hint（ホバーで見える）
+  const stepPrompt: { text: string; hint?: string; actions?: PromptAction[] } | null = pendingChip
+    ? { text: `${pendingChip.kind === 'damage' ? 'ダメージ' : pendingChip.kind === 'power' ? 'パワーアップ' : '最大HP'}+${pendingChip.amount}：つけ先を選択`, hint: 'ステージのホロメンを、クリック（タップ）してつけます。Escで取り消し', actions: [{ label: 'やめる', run: () => setPendingChip(null) }] }
     : !canAct
       ? null
       : turn.phase === 'reset'
         ? resetMove
-          ? { text: 'バックの、移す先の空き枠を、クリック（タップ）してください', actions: [{ label: 'やめる', run: () => setResetMove(null) }] }
+          ? { text: 'バックの移し先を選択', actions: [{ label: 'やめる', run: () => setResetMove(null) }] }
           : {
-              text: 'リセットステップ：カードをクリック（タップ）して、おやすみ／バック移動などを選んでください。終わったら「リセット完了」',
+              text: 'リセットステップ',
+              hint: 'カードをクリック（タップ）して、おやすみ・バック移動などを選びます。終わったら「リセット完了」',
               actions: [
                 { label: `おやすみを全員起こす（${restedUnitZones(state, stepSide).length}）`, run: wakeAll },
                 { label: 'リセット完了', run: () => handleTurnChange(stepSide) },
               ],
             }
         : turn.phase === 'yell'
-          ? { text: 'エールステップ：エールデッキの上の1枚を、つけるホロメンをクリック（タップ）してください（つけるまで、ほかの操作はできません）' }
+          ? { text: 'エールをつけるホロメンを選択', hint: 'エールデッキの上の1枚を、つけるホロメンをクリック（タップ）します。つけるまで、ほかの操作はできません' }
           : turn.phase === 'performance'
             ? attack
-              ? { text: attackTargetZones(state, stepOther).length > 0 ? `「${attack.art.name || 'アーツ'}」でダメージを与える相手（コラボ・センター・バック）を、クリック（タップ）してください` : '相手のステージにホロメンがいません', actions: [{ label: 'やめる', run: () => setAttack(null) }] }
+              ? { text: attackTargetZones(state, stepOther).length > 0 ? `「${attack.art.name || 'アーツ'}」の対象を選択` : '相手にホロメンがいません', hint: '相手のコラボ・センター・バックを、クリック（タップ）します', actions: [{ label: 'やめる', run: () => setAttack(null) }] }
               : readyAttackers.length > 0
-                ? { text: artFrom ? '使うアーツを選んでください' : 'パフォーマンスステップ：アーツを使う、センターかコラボのホロメンをクリック（タップ）してください' }
-                : { text: 'パフォーマンスステップ：アーツを使えるホロメンがいません（エール不足・アーツなし）。「パフォーマンスステップ終了」で、ターンを終えます' }
+                ? { text: artFrom ? 'アーツを選択' : 'アーツを使うホロメンを選択', hint: 'センターかコラボのホロメンを、クリック（タップ）します' }
+                : { text: 'アーツを使えるホロメンがいません', hint: 'エール不足か、アーツがありません。「パフォーマンスステップ終了」でターンを終えます' }
             : null
 
   // ===== 盤面の変化から出す演出：サポートの発動（画面の中央）・ブルーム・ダメージを受けた枠 =====
@@ -1823,21 +1825,6 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
       )}
       {/* ドローステップ：デッキを中央に出して、クリックで1枚引く（ターンを進める側の画面だけ） */}
       {canAct && turn.phase === 'draw' && <DrawStepOverlay count={state[zoneId(stepSide, 'deck')].length} title={`${stepSide === 'me' ? myDisplayName : oppDisplayName}のドローステップ`} onDraw={handleDrawStep} onSkip={() => advancePhase('yell')} />}
-      {/* エール・パフォーマンスステップの案内 */}
-      {stepPrompt && (
-        <div
-          role="status"
-          className="fixed z-[74] flex flex-wrap items-center gap-2 rounded-lg border-2 border-[#ffd76a]/80 bg-[#061217]/95 px-3 py-2 text-xs font-bold text-[#fff3b0] shadow-lg"
-          style={{ top: `calc(${(fullscreen || versus ? 8 : 60) + 54}px + env(safe-area-inset-top, 0px))`, left: 8, right: 8, maxWidth: 560, marginLeft: 'auto', marginRight: 'auto' }}
-        >
-          <span className="min-w-0 flex-1">{stepPrompt.text}</span>
-          {stepPrompt.actions?.map((a) => (
-            <button key={a.label} type="button" className="btn-secondary shrink-0 whitespace-nowrap" onClick={a.run}>
-              {a.label}
-            </button>
-          ))}
-        </div>
-      )}
       <SupportCastOverlay queue={castQueue} onDone={handleCastDone} />
       {artFrom && menuTop && (
         <ArtPickModal
@@ -1866,8 +1853,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
             <ZoneActionMenu
               anchorZone={resetMenu}
               title={top.card.card_name}
-              subtitle={`リセットステップ${top.rested ? '（おやすみ中）' : ''}`}
-              thumb={top.card.image_url}
+              subtitle={top.rested ? 'おやすみ中' : undefined}
               onClose={() => setResetMenu(null)}
               actions={[
                 { id: 'rest', label: 'おやすみ', hint: 'カードを横向き（おやすみ）にします', disabled: !!top.rested, onSelect: () => resetAction(resetMenu, 'rest') },
@@ -2069,6 +2055,20 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
               </button>
             </div>
           )}
+          {/* リセット・エール・パフォーマンスステップの案内：盤面の上部（相手のフィールドの上）に出す。ボタン以外は、クリックを通す */}
+          <div className="relative">
+          {stepPrompt && (
+            <div className="pointer-events-none absolute inset-x-2 top-1.5 z-[65] flex justify-center">
+              <div role="status" title={stepPrompt.hint} className="flex max-w-full flex-wrap items-center justify-center gap-x-2 gap-y-1 rounded-full border border-[#ffd76a]/80 bg-[#061217]/90 px-3 py-1 text-xs font-bold text-[#fff3b0] shadow-lg">
+                <span>{stepPrompt.text}</span>
+                {stepPrompt.actions?.map((a) => (
+                  <button key={a.label} type="button" className="btn-secondary pointer-events-auto shrink-0 whitespace-nowrap !px-2 !py-0.5 text-xs" onClick={a.run}>
+                    {a.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <PlayfieldBoard
             state={state}
             selectedUid={selectedUid}
@@ -2089,6 +2089,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
             pick={pick}
             {...stableBoardHandlers}
           />
+          </div>
         </section>
         {!isTouch && (
           <ColumnSplitter

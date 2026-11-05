@@ -1,14 +1,12 @@
 // このファイルは、管理画面（horoka-admin）から、同期したコピーです。直接は、直さないでください（node scripts/sync-versus.mjs で、上書きされます）。直すときは、管理画面側のファイルを直して、同期してください。
-import { useEffect, useLayoutEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { ZoneId } from '../utils/playfield'
 
-// 盤面の枠（カード）をクリックしたときに出す、操作のメニュー。
+// 盤面の枠（カード）をクリックしたときに出す、メニューの外枠。アーツの選択と、リセットステップのメニューで、共通に使う（色だけ、accent で変える）。
 // ・パソコン：そのカードのすぐ上に出す（上に余白が足りないときは、下）。外側をクリックすると、閉じる
-// ・スマホ（画面が狭いとき）：画面の中央に、大きなモーダルで出す。カードの画像と名前を見せて、ボタンは、指で押しやすい大きさにする
-export type ZoneAction = { id: string; label: string; hint?: string; disabled?: boolean; onSelect: () => void }
-
-const MENU_W = 260
+// ・スマホ（画面が狭いとき）：画面の中央に、モーダルで出す
+const MENU_MAX_W = 380
 const GAP = 10
 const NARROW_QUERY = '(max-width: 640px), (pointer: coarse) and (max-width: 900px)'
 
@@ -23,11 +21,12 @@ export function useNarrowScreen(): boolean {
   return narrow
 }
 
-export function ZoneActionMenu({ anchorZone, title, subtitle, thumb, actions, onClose }: { anchorZone: ZoneId; title: string; subtitle?: string; thumb?: string | null; actions: ZoneAction[]; onClose: () => void }) {
+export function AnchoredMenu({ anchorZone, label, accent, onClose, children }: { anchorZone: ZoneId; label: string; accent: string; onClose: () => void; children: ReactNode }) {
   const narrow = useNarrowScreen()
   const [rect, setRect] = useState<DOMRect | null>(null)
   const [vp, setVp] = useState({ w: window.innerWidth, h: window.innerHeight })
 
+  // カードの、画面上の位置（ズームやスクロールで動くので、そのたびに測り直す）
   useLayoutEffect(() => {
     if (narrow) return
     const measure = () => {
@@ -44,46 +43,24 @@ export function ZoneActionMenu({ anchorZone, title, subtitle, thumb, actions, on
     }
   }, [anchorZone, narrow])
 
-  const edge = '#c084fc'
-
-  // ---- スマホ：画面の中央のモーダル ----
+  // スマホ：画面の中央のモーダル
   if (narrow) {
     return createPortal(
-      <div className="fixed inset-0 z-[90] grid place-items-center bg-black/70 p-4" onClick={onClose}>
-        <div role="dialog" aria-modal="true" aria-label={title} className="w-full overflow-y-auto rounded-2xl p-4 shadow-2xl" style={{ maxWidth: 360, maxHeight: 'calc(100dvh - 32px)', background: '#061217', border: `2px solid ${edge}`, paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 0px))' }} onClick={(e) => e.stopPropagation()}>
-          <div className="mb-3 flex items-center gap-3">
-            {thumb && <img src={thumb} alt="" draggable={false} className="shrink-0 rounded-md object-cover" style={{ width: 52, height: 73, border: '1px solid rgba(255,255,255,0.35)' }} />}
-            <div className="min-w-0 flex-1">
-              <h3 className="hud-font break-words text-base font-bold leading-tight text-white">{title}</h3>
-              {subtitle && <p className="mt-0.5 text-xs text-[#c9b8e8]">{subtitle}</p>}
-            </div>
-            <button type="button" className="btn-secondary shrink-0 !px-3 !py-1.5 text-sm" onClick={onClose} aria-label="閉じる">
-              ✕
-            </button>
-          </div>
-          <ul className="flex flex-col gap-2">
-            {actions.map((a) => (
-              <li key={a.id}>
-                <button type="button" role="menuitem" disabled={a.disabled} onClick={a.onSelect} className="w-full rounded-xl border-2 border-[#c084fc]/60 bg-[#c084fc]/[0.1] px-4 py-3 text-left text-base font-bold text-white active:bg-[#c084fc]/30 disabled:cursor-not-allowed disabled:opacity-40" style={{ minHeight: 52 }}>
-                  {a.label}
-                  {a.hint && <span className="mt-0.5 block text-xs font-normal leading-snug text-[#c9b8e8]">{a.hint}</span>}
-                </button>
-              </li>
-            ))}
-          </ul>
+      <div className="fixed inset-0 z-[90] grid place-items-center bg-black/70 p-3" onClick={onClose}>
+        <div role="dialog" aria-modal="true" aria-label={label} className="w-full overflow-y-auto rounded-2xl p-3 shadow-2xl" style={{ maxWidth: 420, maxHeight: 'calc(100dvh - 24px)', background: '#061217', border: `2px solid ${accent}`, paddingBottom: 'calc(12px + env(safe-area-inset-bottom, 0px))' }} onClick={(e) => e.stopPropagation()}>
+          {children}
         </div>
       </div>,
       document.body
     )
   }
 
-  // ---- パソコン：カードのすぐ上のメニュー ----
-  const w = Math.min(vp.w - 16, MENU_W)
+  const w = Math.min(vp.w - 16, MENU_MAX_W)
   const cx = rect ? rect.left + rect.width / 2 : vp.w / 2
   const left = Math.max(8, Math.min(cx - w / 2, vp.w - 8 - w))
   const spaceAbove = rect ? rect.top - GAP - 8 : 0
   const spaceBelow = rect ? vp.h - rect.bottom - GAP - 8 : 0
-  const above = !rect || spaceAbove >= 220 || spaceAbove >= spaceBelow
+  const above = !rect || spaceAbove >= 200 || spaceAbove >= spaceBelow
   const maxH = Math.max(140, rect ? (above ? spaceAbove : spaceBelow) : vp.h - 32)
   const pos = !rect ? { top: 16 } : above ? { bottom: vp.h - rect.top + GAP } : { top: rect.bottom + GAP }
   const caretLeft = Math.max(18, Math.min(cx - left, w - 18))
@@ -91,29 +68,45 @@ export function ZoneActionMenu({ anchorZone, title, subtitle, thumb, actions, on
   return createPortal(
     <>
       <div className="fixed inset-0 z-[89]" onClick={onClose} />
-      <div role="menu" aria-label={title} className="fixed z-[90]" style={{ left, width: w, ...pos }}>
-        {rect && <div aria-hidden style={{ position: 'absolute', left: caretLeft - 8, [above ? 'bottom' : 'top']: -8, width: 16, height: 16, transform: 'rotate(45deg)', background: '#061217', borderRight: above ? `2px solid ${edge}` : undefined, borderBottom: above ? `2px solid ${edge}` : undefined, borderLeft: above ? undefined : `2px solid ${edge}`, borderTop: above ? undefined : `2px solid ${edge}` }} />}
-        <div className="overflow-y-auto rounded-xl p-2 shadow-2xl" style={{ background: '#061217', border: `2px solid ${edge}`, maxHeight: maxH }}>
-          <div className="mb-1.5 flex items-center gap-2 px-1">
-            <h3 className="hud-font min-w-0 flex-1 truncate text-sm font-bold text-white">{title}</h3>
-            <button type="button" className="btn-secondary shrink-0 !px-2 !py-0.5 text-xs" onClick={onClose}>
-              閉じる
-            </button>
-          </div>
-          {subtitle && <p className="mb-1.5 px-1 text-[11px] text-[#9fc3ca]">{subtitle}</p>}
-          <ul className="flex flex-col gap-1.5">
-            {actions.map((a) => (
-              <li key={a.id}>
-                <button type="button" role="menuitem" disabled={a.disabled} onClick={a.onSelect} className="w-full rounded-lg border-2 border-[#c084fc]/50 bg-[#c084fc]/[0.08] px-3 py-2 text-left text-sm font-bold text-white hover:border-[#e9d5ff] focus-visible:border-[#e9d5ff] focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40">
-                  {a.label}
-                  {a.hint && <span className="block text-[11px] font-normal text-[#c9b8e8]">{a.hint}</span>}
-                </button>
-              </li>
-            ))}
-          </ul>
+      <div role="dialog" aria-label={label} className="fixed z-[90]" style={{ left, width: w, ...pos }}>
+        {rect && <div aria-hidden style={{ position: 'absolute', left: caretLeft - 8, [above ? 'bottom' : 'top']: -8, width: 16, height: 16, transform: 'rotate(45deg)', background: '#061217', borderRight: above ? `2px solid ${accent}` : undefined, borderBottom: above ? `2px solid ${accent}` : undefined, borderLeft: above ? undefined : `2px solid ${accent}`, borderTop: above ? undefined : `2px solid ${accent}` }} />}
+        <div className="overflow-y-auto rounded-xl p-2.5 shadow-2xl" style={{ background: '#061217', border: `2px solid ${accent}`, maxHeight: maxH }}>
+          {children}
         </div>
       </div>
     </>,
     document.body
+  )
+}
+
+// リセットステップのメニュー（アーツの選択と同じ見た目。色だけ、紫）。説明は、ホバーで見える
+export type ZoneAction = { id: string; label: string; hint?: string; disabled?: boolean; onSelect: () => void }
+const ACCENT = '#c084fc'
+
+export function ZoneActionMenu({ anchorZone, title, subtitle, actions, onClose }: { anchorZone: ZoneId; title: string; subtitle?: string; actions: ZoneAction[]; onClose: () => void }) {
+  return (
+    <AnchoredMenu anchorZone={anchorZone} label={title} accent={ACCENT} onClose={onClose}>
+      <div className="mb-2 flex items-center gap-2">
+        <h3 className="hud-font truncate text-sm font-bold text-white">
+          {title}
+          {subtitle && <span className="ml-2 text-xs font-normal text-[#9fc3ca]">{subtitle}</span>}
+        </h3>
+        <button type="button" className="btn-secondary ml-auto shrink-0" onClick={onClose}>
+          やめる
+        </button>
+      </div>
+      <ul className="flex flex-col gap-1.5">
+        {actions.map((a) => (
+          <li key={a.id} title={a.hint} className="rounded-lg border-2 p-2" style={{ borderColor: 'rgba(192,132,252,0.5)', background: 'rgba(192,132,252,0.07)', opacity: a.disabled ? 0.55 : 1 }}>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold text-white">{a.label}</span>
+              <button type="button" disabled={a.disabled} onClick={a.onSelect} className="btn-primary ml-auto !px-3 !py-1 disabled:cursor-not-allowed" style={{ background: ACCENT, borderColor: '#e9d5ff', color: '#1b0f2e' }} aria-label={a.label}>
+                選ぶ
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </AnchoredMenu>
   )
 }
