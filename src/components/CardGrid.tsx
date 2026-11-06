@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import type { Card } from '../types/card'
 import { CardTile } from './CardTile'
 import { useGridLayout } from '../hooks/useGridLayout'
@@ -35,6 +36,11 @@ function chipLines(label: string): string[] {
 export function CardGrid({ cards, onCardClick, isFav, onToggleFav, selectionMode, selectedIds, onToggleSelect, tileScale = 1, sortKey, groupWithSet, groupLabelFor, fixedColumns }: Props) {
   // PCは最小タイル幅ベースの自動列数、スマホは倍率1で4列（詳細はuseGridLayout）
   const layout = useGridLayout(tileScale)
+  // 区切りの見出しは、1枚につき1回だけ計算する（前のカードとの比較のたびに、計算し直さない）
+  const labels = useMemo(
+    () => cards.map((c) => (groupLabelFor ? groupLabelFor(c) : sortKey ? getSortGroupLabel(c, sortKey, { withSet: groupWithSet }) : null)),
+    [cards, groupLabelFor, sortKey, groupWithSet]
+  )
   return (
     <div
       style={{
@@ -45,9 +51,8 @@ export function CardGrid({ cards, onCardClick, isFav, onToggleFav, selectionMode
     >
       {cards.map((card, index) => {
         // 並び替えの区切り: 前のカードと見出しが変わったカードの左側（カードとカードの間）に縦の区切り線を引く
-        const labelOf = (c: Card) => (groupLabelFor ? groupLabelFor(c) : sortKey ? getSortGroupLabel(c, sortKey, { withSet: groupWithSet }) : null)
-        const label = labelOf(card)
-        const prevLabel = index > 0 ? labelOf(cards[index - 1]!) : null
+        const label = labels[index] ?? null
+        const prevLabel = index > 0 ? (labels[index - 1] ?? null) : null
         const startsGroup = label !== null && (index === 0 || label !== prevLabel)
         return (
           <div key={card.id} style={{ position: 'relative' }}>

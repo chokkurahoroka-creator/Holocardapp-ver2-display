@@ -201,14 +201,6 @@ select.field option {
 }
 
 /* ===== レア度演出（カード一覧・詳細のサムネイル枠） ===== */
-@keyframes hud-holo-shift {
-  0% { background-position: 0% 50%; }
-  100% { background-position: 200% 50%; }
-}
-@keyframes hud-glow-pulse-color {
-  0%, 100% { box-shadow: 0 0 8px var(--pulse-color, rgba(255, 255, 255, 0.3)); }
-  50% { box-shadow: 0 0 18px var(--pulse-color-strong, rgba(255, 255, 255, 0.7)); }
-}
 @keyframes hud-shine-sweep-hover {
   0% { transform: translateX(-160%) rotate(-22deg); }
   100% { transform: translateX(220%) rotate(-22deg); }

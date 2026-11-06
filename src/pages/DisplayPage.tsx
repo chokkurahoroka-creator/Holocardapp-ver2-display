@@ -93,17 +93,18 @@ export function DisplayPage() {
     setFilters(EMPTY_FILTERS)
   }, [activeKey])
 
-  const filteredByPanel = applyCardFilters(cards, filters)
+  // 絞り込み・並び替え・まとめ直しは、元になる値が変わったときだけ計算する（モーダルを開くなどの、関係ない再描画のたびに、全カードを計算し直さない）
+  const filteredByPanel = useMemo(() => applyCardFilters(cards, filters), [cards, filters])
   const searched = useCardSearch(filteredByPanel, searchQuery)
   // カード番号順は昇順固定（昇降順ボタンは無効）。降順の状態が残っていても、カード番号順では昇順で並べる
   const slotSort = sortKey === 'slot'
   const effectiveSortDir: SortDir = slotSort ? 'asc' : sortDir
   // 新着カードは、カード番号順のとき、通し番号（overall）を使った、パック→新規→再録→パラレルの順で、日ごとに並べる
   const effectiveSortKey: SortKey = isRecent && sortKey === 'slot' ? 'overall' : sortKey
-  const sorted = sortCards(searched, effectiveSortKey, effectiveSortDir)
-  const groupedByType = groupCardsByType(sorted)
-  const dayGroups = isRecent ? groupByRegisteredDay(sorted) : []
-  const setNameByCode = new Map(sets.map((s) => [s.set_code, setLabel(s)] as const))
+  const sorted = useMemo(() => sortCards(searched, effectiveSortKey, effectiveSortDir), [searched, effectiveSortKey, effectiveSortDir])
+  const groupedByType = useMemo(() => groupCardsByType(sorted), [sorted])
+  const dayGroups = useMemo(() => (isRecent ? groupByRegisteredDay(sorted) : []), [isRecent, sorted])
+  const setNameByCode = useMemo(() => new Map(sets.map((s) => [s.set_code, setLabel(s)] as const)), [sets])
 
   // 空き枠は区分ごとのスロット番号（slot）で1〜設定枚数まで表示する（通し番号は使わない）
   // 検索中や、カード番号順以外の並び替えをしているときは「空いている枠」の概念がそのままでは意味を持たないため、

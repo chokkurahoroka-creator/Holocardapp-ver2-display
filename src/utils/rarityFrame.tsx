@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react'
+import { useEffect, useRef, type CSSProperties } from 'react'
 import './rarityEffects.css'
 
 // レア度ごとの枠演出（管理画面のカード一覧と同じ設定）
@@ -93,88 +93,119 @@ export function getRarityConfig(rarity: string | null | undefined): RarityConfig
   return RARITY_CONFIG[(rarity || '').toUpperCase()] ?? { badgeColor: '#9fc3ca' }
 }
 
-// 光の斜線は、ホバー中だけ、左端の外から現れて右端の外へ抜けるまでを繰り返す（rarityEffects.css）。
-// 親要素に "group" クラスがあれば、その要素全体へのホバーで流れる（カードタイル・モーダルの画像）
-export function renderRarityFrame(imageUrl: string, cardName: string, rarity: string | null | undefined) {
-  const config = getRarityConfig(rarity)
-  const rarityName = (rarity || '')
-  const frameStyle: CSSProperties = { borderRadius: '0.5rem' }
-  const animations: string[] = []
+// 画面の外にあるカードの枠は、動きを止める（SR以上のカードが何百枚も並んでも、見えている分だけ動かす）。
+// 全カードで1つの IntersectionObserver を共有し、状態（React の再描画）は使わず、属性だけを付け外しする
+let sharedObserver: IntersectionObserver | null = null
+function getObserver(): IntersectionObserver | null {
+  if (typeof IntersectionObserver === 'undefined') return null
+  if (!sharedObserver) {
+    sharedObserver = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) e.target.toggleAttribute('data-paused', !e.isIntersecting)
+      },
+      { rootMargin: '160px' }
+    )
+  }
+  return sharedObserver
+}
 
+// 光の斜線は、ホバー中だけ、左端の外から現れて右端の外へ抜けるまでを繰り返す（rarityEffects.css）。
+// 親要素に "group" クラスがあれば、その要素全体へのホバーで流れる（カードタイル・モーダルの画像）。
+// 枠の構造（外側から）：
+//   .rarity-frame … 位置の基準。止まっている影だけをつける
+//     .rarity-glow … 強い影をつけた層。透明度だけを動かして、光が脈打つように見せる（SR以上）
+//     枠の線 … 色つきの枠・グラデーションの枠。切り取って（overflow）、中のホロの帯を枠の形に収める
+//       .rarity-holo … SEC の、流れる虹色の帯（transform だけを動かす）
+//       画像 … 光の斜線は、この中で動く
+function RarityFrame({ imageUrl, cardName, rarity }: { imageUrl: string; cardName: string; rarity: string | null | undefined }) {
+  const config = getRarityConfig(rarity)
+  const rarityName = rarity || ''
+  const ref = useRef<HTMLDivElement>(null)
+  const animated = Boolean(config.pulseColor || config.borderAnimated)
+
+  useEffect(() => {
+    if (!animated) return
+    const el = ref.current
+    const io = getObserver()
+    if (!el || !io) return
+    io.observe(el)
+    return () => io.unobserve(el)
+  }, [animated])
+
+  const outerStyle: CSSProperties = { position: 'relative', borderRadius: '0.5rem' }
+  if (config.staticGlow) outerStyle.boxShadow = `0 0 10px ${config.staticGlow}`
+  else if (config.pulseColor) outerStyle.boxShadow = `0 0 8px ${config.pulseColor}`
+
+  const boxStyle: CSSProperties = { position: 'relative', overflow: 'hidden', borderRadius: '0.5rem' }
+  const isGradient = !!config.border && config.border.includes('gradient')
   if (config.border) {
-    if (config.border.includes('gradient')) {
-      frameStyle.background = config.border
-      frameStyle.backgroundSize = config.borderAnimated ? '300% 300%' : '100% 100%'
-      frameStyle.padding = '2px'
-      if (config.borderAnimated) animations.push('hud-holo-shift 3s linear infinite')
+    if (isGradient) {
+      boxStyle.padding = '2px'
+      if (!config.borderAnimated) boxStyle.background = config.border
     } else {
-      frameStyle.border = `2px solid ${config.border}`
+      boxStyle.border = `2px solid ${config.border}`
     }
   } else if (!config.sweep && !config.staticGlow) {
-    frameStyle.border = '1px solid var(--hud-line)'
+    boxStyle.border = '1px solid var(--hud-line)'
   }
 
-  if (config.pulseColor) {
-    animations.push('hud-glow-pulse-color 2.4s ease-in-out infinite')
-    ;(frameStyle as Record<string, string>)['--pulse-color'] = config.pulseColor
-    ;(frameStyle as Record<string, string>)['--pulse-color-strong'] = config.pulseColorStrong ?? config.pulseColor
-  }
-  if (config.staticGlow) {
-    frameStyle.boxShadow = `0 0 10px ${config.staticGlow}`
-  }
-  if (animations.length) frameStyle.animation = animations.join(', ')
+  const sweep = config.sweep
+    ? (() => {
+        const s = SWEEP_STYLE[config.sweep]
+        const duration = rarityName.toUpperCase() === 'SEC' ? SWEEP_DURATION_SEC_FAST : SWEEP_DURATION_SEC
+        // 斜線の中心がカード左端の外(-0.5W)から右端の外(1.5W)まで動くように、移動量を自身の幅に対する%で求める
+        // （translateXの%は要素自身の幅が基準）。斜めに傾いた帯の端まで完全に外に出る余裕を見ている
+        const startPct = Math.round(((-0.5 - s.width / 2) / s.width) * 100)
+        const endPct = Math.round(((1.5 - s.width / 2) / s.width) * 100)
+        const streak = (delayMs: number, key: number) => (
+          <span
+            key={key}
+            className="rarity-sweep"
+            style={
+              {
+                position: 'absolute',
+                pointerEvents: 'none',
+                top: '-30%',
+                left: 0,
+                width: `${s.width * 100}%`,
+                height: '160%',
+                background: `linear-gradient(100deg, transparent, rgba(255,255,255,${s.opacity}), transparent)`,
+                transform: `translateX(${startPct}%) rotate(${SWEEP_ANGLE}deg)`,
+                opacity: 0,
+                animationDuration: `${duration}s`,
+                animationDelay: `${delayMs}ms`,
+                '--sweep-start': `${startPct}%`,
+                '--sweep-end': `${endPct}%`,
+                '--sweep-angle': `${SWEEP_ANGLE}deg`,
+              } as CSSProperties
+            }
+          />
+        )
+        return config.sweepDouble ? (
+          <>
+            {streak(0, 0)}
+            {streak(SWEEP_SECOND_STREAK_OFFSET_MS, 1)}
+          </>
+        ) : (
+          streak(0, 0)
+        )
+      })()
+    : null
 
   return (
-    <div className="rarity-frame" style={frameStyle}>
-      <div style={{ position: 'relative', overflow: 'hidden', borderRadius: '0.4rem' }}>
-        <img
-          src={imageUrl}
-          alt={cardName}
-          loading="lazy"
-          style={{ display: 'block', width: '100%', aspectRatio: '5/7', objectFit: 'cover' }}
-        />
-        {config.sweep &&
-          (() => {
-            const s = SWEEP_STYLE[config.sweep!]
-            const duration = rarityName.toUpperCase() === 'SEC' ? SWEEP_DURATION_SEC_FAST : SWEEP_DURATION_SEC
-            // 斜線の中心がカード左端の外(-0.5W)から右端の外(1.5W)まで動くように、移動量を自身の幅に対する%で求める
-            // （translateXの%は要素自身の幅が基準）。斜めに傾いた帯の端まで完全に外に出る余裕を見ている
-            const startPct = Math.round(((-0.5 - s.width / 2) / s.width) * 100)
-            const endPct = Math.round(((1.5 - s.width / 2) / s.width) * 100)
-            const streak = (delayMs: number, key: number) => (
-              <span
-                key={key}
-                className="rarity-sweep"
-                style={
-                  {
-                    position: 'absolute',
-                    pointerEvents: 'none',
-                    top: '-30%',
-                    left: 0,
-                    width: `${s.width * 100}%`,
-                    height: '160%',
-                    background: `linear-gradient(100deg, transparent, rgba(255,255,255,${s.opacity}), transparent)`,
-                    transform: `translateX(${startPct}%) rotate(${SWEEP_ANGLE}deg)`,
-                    opacity: 0,
-                    animationDuration: `${duration}s`,
-                    animationDelay: `${delayMs}ms`,
-                    '--sweep-start': `${startPct}%`,
-                    '--sweep-end': `${endPct}%`,
-                    '--sweep-angle': `${SWEEP_ANGLE}deg`,
-                  } as CSSProperties
-                }
-              />
-            )
-            return config.sweepDouble ? (
-              <>
-                {streak(0, 0)}
-                {streak(SWEEP_SECOND_STREAK_OFFSET_MS, 1)}
-              </>
-            ) : (
-              streak(0, 0)
-            )
-          })()}
+    <div ref={ref} className="rarity-frame" style={outerStyle}>
+      {config.pulseColor && <span aria-hidden="true" className="rarity-glow" style={{ boxShadow: `0 0 18px ${config.pulseColorStrong ?? config.pulseColor}` }} />}
+      <div style={boxStyle}>
+        {isGradient && config.borderAnimated && <span aria-hidden="true" className="rarity-holo" style={{ background: config.border }} />}
+        <div style={{ position: 'relative', zIndex: 1, overflow: 'hidden', borderRadius: '0.4rem' }}>
+          <img src={imageUrl} alt={cardName} loading="lazy" decoding="async" style={{ display: 'block', width: '100%', aspectRatio: '5/7', objectFit: 'cover' }} />
+          {sweep}
+        </div>
       </div>
     </div>
   )
+}
+
+export function renderRarityFrame(imageUrl: string, cardName: string, rarity: string | null | undefined) {
+  return <RarityFrame imageUrl={imageUrl} cardName={cardName} rarity={rarity} />
 }
