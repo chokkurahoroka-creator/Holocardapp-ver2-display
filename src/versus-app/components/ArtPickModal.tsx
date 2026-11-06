@@ -39,7 +39,7 @@ export function ArtPickModal({ anchorZone, card, arts, loading, error, power, pa
           const ok = payable(a)
           const plus = isPlusDamage(a.damage)
           return (
-            <li key={i} title={ok ? undefined : 'エールが足りません'} className="rounded-lg border-2 p-2" style={{ borderColor: ok ? 'rgba(232,140,77,0.5)' : 'rgba(120,130,135,0.4)', background: ok ? 'rgba(232,140,77,0.07)' : 'rgba(120,130,135,0.06)', opacity: ok ? 1 : 0.55 }}>
+            <li key={i} title={ok ? undefined : 'エールが足りません（確認のうえで、使えます）'} className="rounded-lg border-2 p-2" style={{ borderColor: ok ? 'rgba(232,140,77,0.5)' : 'rgba(120,130,135,0.4)', background: ok ? 'rgba(232,140,77,0.07)' : 'rgba(120,130,135,0.06)', opacity: ok ? 1 : 0.55 }}>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="inline-flex items-center gap-1">
                   {(a.yellCost ?? []).map((c, j) => (
@@ -70,8 +70,8 @@ export function ArtPickModal({ anchorZone, card, arts, loading, error, power, pa
                     ))}
                   </label>
                 )}
-                <button type="button" disabled={!ok} className="btn-primary ml-auto !px-3 !py-1 disabled:cursor-not-allowed" onClick={() => onPick(a, plus ? extraOf(i) : 0)}>
-                  {ok ? '使う' : 'エール不足'}
+                <button type="button" className="btn-primary ml-auto !px-3 !py-1" onClick={() => onPick(a, plus ? extraOf(i) : 0)} title={ok ? undefined : 'エールが足りません。確認のうえで、使えます'}>
+                  {ok ? '使う' : '使う（エール不足）'}
                 </button>
               </div>
             </li>

@@ -21,7 +21,8 @@ export function useNarrowScreen(): boolean {
   return narrow
 }
 
-export function AnchoredMenu({ anchorZone, label, accent, onClose, children }: { anchorZone: ZoneId; label: string; accent: string; onClose: () => void; children: ReactNode }) {
+// modal=false：外側をクリックしても、閉じない（盤面を、そのまま操作できる。スマホでは、中央のモーダルのまま）
+export function AnchoredMenu({ anchorZone, label, accent, onClose, modal = true, children }: { anchorZone: ZoneId; label: string; accent: string; onClose: () => void; modal?: boolean; children: ReactNode }) {
   const narrow = useNarrowScreen()
   const [rect, setRect] = useState<DOMRect | null>(null)
   const [vp, setVp] = useState({ w: window.innerWidth, h: window.innerHeight })
@@ -67,7 +68,7 @@ export function AnchoredMenu({ anchorZone, label, accent, onClose, children }: {
 
   return createPortal(
     <>
-      <div className="fixed inset-0 z-[89]" onClick={onClose} />
+      {modal && <div className="fixed inset-0 z-[89]" onClick={onClose} />}
       <div role="dialog" aria-label={label} className="fixed z-[90]" style={{ left, width: w, ...pos }}>
         {rect && <div aria-hidden style={{ position: 'absolute', left: caretLeft - 8, [above ? 'bottom' : 'top']: -8, width: 16, height: 16, transform: 'rotate(45deg)', background: '#061217', borderRight: above ? `2px solid ${accent}` : undefined, borderBottom: above ? `2px solid ${accent}` : undefined, borderLeft: above ? undefined : `2px solid ${accent}`, borderTop: above ? undefined : `2px solid ${accent}` }} />}
         <div className="overflow-y-auto rounded-xl p-2.5 shadow-2xl" style={{ background: '#061217', border: `2px solid ${accent}`, maxHeight: maxH }}>
@@ -83,9 +84,9 @@ export function AnchoredMenu({ anchorZone, label, accent, onClose, children }: {
 export type ZoneAction = { id: string; label: string; hint?: string; disabled?: boolean; onSelect: () => void }
 const ACCENT = '#c084fc'
 
-export function ZoneActionMenu({ anchorZone, title, subtitle, actions, onClose }: { anchorZone: ZoneId; title: string; subtitle?: string; actions: ZoneAction[]; onClose: () => void }) {
+export function ZoneActionMenu({ anchorZone, title, subtitle, actions, onClose, modal = true }: { anchorZone: ZoneId; title: string; subtitle?: string; actions: ZoneAction[]; onClose: () => void; modal?: boolean }) {
   return (
-    <AnchoredMenu anchorZone={anchorZone} label={title} accent={ACCENT} onClose={onClose}>
+    <AnchoredMenu anchorZone={anchorZone} label={title} accent={ACCENT} onClose={onClose} modal={modal}>
       <div className="mb-2 flex items-center gap-2">
         <h3 className="hud-font truncate text-sm font-bold text-white">
           {title}
@@ -95,15 +96,13 @@ export function ZoneActionMenu({ anchorZone, title, subtitle, actions, onClose }
           やめる
         </button>
       </div>
-      <ul className="flex flex-col gap-1.5">
+      {/* ボタンは、行全体を押せる大きさで、2列に並べる */}
+      <ul className="grid grid-cols-2 gap-2">
         {actions.map((a) => (
-          <li key={a.id} title={a.hint} className="rounded-lg border-2 p-2" style={{ borderColor: 'rgba(192,132,252,0.5)', background: 'rgba(192,132,252,0.07)', opacity: a.disabled ? 0.55 : 1 }}>
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-bold text-white">{a.label}</span>
-              <button type="button" disabled={a.disabled} onClick={a.onSelect} className="btn-primary ml-auto !px-3 !py-1 disabled:cursor-not-allowed" style={{ background: ACCENT, borderColor: '#e9d5ff', color: '#1b0f2e' }} aria-label={a.label}>
-                選ぶ
-              </button>
-            </div>
+          <li key={a.id} className={actions.length % 2 === 1 && a.id === actions[actions.length - 1]?.id ? 'col-span-2' : undefined}>
+            <button type="button" title={a.hint} disabled={a.disabled} onClick={a.onSelect} className="w-full rounded-lg border-2 px-2 py-3 text-sm font-bold text-white hover:brightness-125 active:brightness-150 disabled:cursor-not-allowed disabled:opacity-40" style={{ minHeight: 48, borderColor: ACCENT, background: 'rgba(192,132,252,0.16)' }}>
+              {a.label}
+            </button>
           </li>
         ))}
       </ul>

@@ -26,6 +26,7 @@ import {
   attachYellFromDeck,
   compactBacks,
   HAND_SIZE,
+  initialPrep,
   loseLifeToHolder,
   artPayable,
   attackTargetZones,
@@ -984,8 +985,11 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
   const centerDetail = useCardDetailForPreview(performing && centerTop ? centerTop.card.id : null)
   const collabDetail = useCardDetailForPreview(performing && collabTop ? collabTop.card.id : null)
   const artsOf = (z: ZoneId): ArtRow[] => ((z === centerZone ? centerDetail : collabDetail).detail?.arts ?? []).filter((a) => a.name || a.damage || a.effectText)
-  // アーツを使えるホロメン（必要なエールが足りているアーツが、1つ以上ある）：光らせる
-  const readyAttackers = performing ? ([centerZone, collabZone] as ZoneId[]).filter((z) => topHolomen(z) && artsOf(z).some((a) => artPayable(a, state[z]))) : []
+  // アーツを使えるホロメン（必要なエールが足りているアーツが、1つ以上ある）：光らせる。
+  // エールが足りないアーツしかないホロメンは、光らないが、クリックはできる（確認のうえで、使える）
+  const attackerCandidates = performing ? ([centerZone, collabZone] as ZoneId[]).filter((z) => topHolomen(z) && artsOf(z).length > 0) : []
+  const readyAttackers = attackerCandidates.filter((z) => artsOf(z).some((a) => artPayable(a, state[z])))
+  const weakAttackers = attackerCandidates.filter((z) => !readyAttackers.includes(z))
   const menuTop = artFrom ? topHolomen(artFrom) : undefined
   const menuDetail = artFrom === centerZone ? centerDetail : collabDetail
 
@@ -1116,7 +1120,17 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
           return rest ? setUnitRest(moved, zone, true) : moved
         })
         setMessage(rest ? 'おやすみにして、バックに移しました' : 'バックに移しました')
-      } else setResetMenu(zone)
+      } else {
+        // タップで、おやすみ／アクティブを切り替える。バックへの移動などは、サポートエリアの上のメニューから選ぶ
+        const cur = unitParts(stateRef.current[zone]).top
+        if (!cur) return
+        const key = parseZone(zone)?.key
+        const front = key === 'center' || key === 'collab'
+        const centerEmpty = stateRef.current[zoneId(stepSide, 'center')].length === 0
+        setState((st) => setUnitRest(st, zone, !cur.rested))
+        setMessage(`${cur.card.card_name}を、${cur.rested ? 'アクティブに戻しました' : 'おやすみにしました'}`)
+        setResetMenu(front || centerEmpty ? zone : null)
+      }
       return
     }
     if (turnRef.current.phase === 'yell') {
@@ -1167,7 +1181,6 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
         const zones = emptyBackZones(state, stepSide, resetMove.from)
         return zones.length > 0 ? { zones, color: '#c084fc' } : null
       }
-      if (resetMenu) return null
       const zones = attackTargetZones(state, stepSide)
       return zones.length > 0 ? { zones, color: '#c084fc' } : null
     }
@@ -1180,11 +1193,11 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
         const zones = attackTargetZones(state, stepOther)
         return zones.length > 0 ? { zones, color: '#ef4444' } : null
       }
-      return readyAttackers.length > 0 ? { zones: readyAttackers, color: '#ffd76a' } : null
+      return attackerCandidates.length > 0 ? { zones: readyAttackers, color: '#ffd76a', weak: weakAttackers } : null
     }
     return null
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingChip, chipZones, canAct, turn.phase, state, stepSide, stepOther, attack, resetMenu, resetMove, readyAttackers.join(',')])
+  }, [pendingChip, chipZones, canAct, turn.phase, state, stepSide, stepOther, attack, resetMenu, resetMove, readyAttackers.join(','), weakAttackers.join(',')])
 
   // 画面の上に出す、いまのステップの案内
   type PromptAction = { label: string; run: () => void }
@@ -1209,9 +1222,9 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
           : turn.phase === 'performance'
             ? attack
               ? { text: attackTargetZones(state, stepOther).length > 0 ? `「${attack.art.name || 'アーツ'}」の対象を選択` : '相手にホロメンがいません', hint: '相手のコラボ・センター・バックを、クリック（タップ）します', actions: [{ label: 'やめる', run: () => setAttack(null) }] }
-              : readyAttackers.length > 0
+              : attackerCandidates.length > 0
                 ? { text: artFrom ? 'アーツを選択' : 'アーツを使うホロメンを選択', hint: 'センターかコラボのホロメンを、クリック（タップ）します' }
-                : { text: 'アーツを使えるホロメンがいません', hint: 'エール不足か、アーツがありません。「パフォーマンスステップ終了」でターンを終えます' }
+                : { text: 'アーツを使えるホロメンがいません', hint: 'アーツがありません。「パフォーマンスステップ終了」でターンを終えます' }
             : null
 
   // ===== 盤面の変化から出す演出：サポートの発動（画面の中央）・ブルーム・ダメージを受けた枠 =====
@@ -1470,6 +1483,20 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
     if (w) setWinner(w)
   }, [state])
   const closeWinner = useCallback(() => setWinner(null), [])
+  // 再戦（対戦ルームだけ）：両方のカードを戻して、デッキ選択から、準備をやり直す。相手の画面も、デッキ選択に戻る
+  const handleRematch = () => {
+    if (!versus) return
+    setWinner(null)
+    setState(emptyState())
+    setSkillUsed({})
+    setTurn(initialTurn())
+    setPrep(initialPrep())
+    setMessage('再戦：デッキ選択から、始めます')
+  }
+  // 相手が再戦を押したら（準備がやり直しになったら）、こちらの勝敗の画面は、閉じる
+  useEffect(() => {
+    if (prep) setWinner(null)
+  }, [prep])
   const myDisplayName = versus ? versus.myName : '自分'
   const oppDisplayName = versus ? versus.oppName : '相手'
 
@@ -1617,6 +1644,20 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
         {!versus && (<button type="button" className="btn-secondary !px-0 !py-1 text-[9.5px] whitespace-nowrap tracking-tighter" onClick={() => setState((s) => moveCard(s, pc.uid, 'holder'))}>
           ホルダー
         </button>)}
+        {versus && (
+          <button
+            type="button"
+            className="btn-secondary col-span-2 !px-0 !py-1 text-[9.5px] whitespace-nowrap tracking-tighter"
+            title="相手に見える状態で、手札に加えます"
+            onClick={() => {
+              const side = parseZone(viewer ?? 'me:hand')?.side ?? 'me'
+              setState((s) => updateCard(moveCard(s, pc.uid, zoneId(side, 'hand')), pc.uid, { revealed: true }))
+              setMessage(`${pc.card.card_name}を、公開して手札に加えました（相手に見えます）`)
+            }}
+          >
+            公開して手札
+          </button>
+        )}
         <button type="button" className="btn-secondary !px-0 !py-1 text-[9.5px] whitespace-nowrap tracking-tighter" onClick={() => sendToStage(pc, parseZone(viewer ?? 'me:hand')?.side ?? 'me')}>
           ステージ
         </button>
@@ -1836,6 +1877,8 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
           power={unitPower(state[artFrom])}
           payable={(a) => artPayable(a, state[artFrom])}
           onPick={(art, extra) => {
+            // エールが足りないアーツは、確認のうえで、使える
+            if (!artPayable(art, state[artFrom]) && !window.confirm('エールが足りません。このアーツを使いますか？')) return
             setAttack({ art, extra, from: artFrom })
             setArtFrom(null)
           }}
@@ -1851,17 +1894,16 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
           const centerEmpty = state[zoneId(stepSide, 'center')].length === 0
           return (
             <ZoneActionMenu
-              anchorZone={resetMenu}
+              anchorZone={zoneId('me', 'log')}
+              modal={false}
               title={top.card.card_name}
-              subtitle={top.rested ? 'おやすみ中' : undefined}
+              subtitle={top.rested ? 'おやすみ中' : 'アクティブ'}
               onClose={() => setResetMenu(null)}
               actions={[
-                { id: 'rest', label: 'おやすみ', hint: 'カードを横向き（おやすみ）にします', disabled: !!top.rested, onSelect: () => resetAction(resetMenu, 'rest') },
-                ...(top.rested ? [{ id: 'wake', label: 'アクティブにする', hint: '縦向きに戻します', onSelect: () => resetAction(resetMenu, 'wake') }] : []),
                 ...(front
                   ? [
                       { id: 'restBack', label: 'おやすみ＆バック移動', hint: 'おやすみにして、空いているバックに、自動で移します', onSelect: () => resetAction(resetMenu, 'restBack') },
-                      { id: 'back', label: 'バック移動', hint: 'そのままの向きで、バックの空き枠に移します', onSelect: () => resetAction(resetMenu, 'back') },
+                      { id: 'back', label: 'バック移動', hint: 'そのままの向きで、バックの空き枠を選んで移します', onSelect: () => resetAction(resetMenu, 'back') },
                     ]
                   : []),
                 ...(!front && centerEmpty ? [{ id: 'toCenter', label: 'センターへ移動', hint: 'センターが空いています', onSelect: () => resetAction(resetMenu, 'toCenter') }] : []),
@@ -1900,6 +1942,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
           name={winner === 'me' ? myDisplayName : oppDisplayName}
           subtitle={`${winner === 'me' ? oppDisplayName : myDisplayName}のライフが0になりました${versus && winner === 'me' ? '。おめでとう！' : ''}`}
           onClose={closeWinner}
+          onRematch={versus ? handleRematch : undefined}
         />
       )}
       {isTouch && logOpen && (

@@ -14,7 +14,7 @@ export type DragItem = NonNullable<PlayDrag>
 
 // 「どの枠をクリック（タップ）するか」を選ばせるモード（エールをつけるホロメンを選ぶ・アーツを使うセンターを選ぶ・ダメージを与える相手を選ぶ）。
 // zones の枠が光って、クリックすると onPickZone が呼ばれる
-export type PickState = { zones: ZoneId[]; color: string }
+export type PickState = { zones: ZoneId[]; color: string; weak?: ZoneId[] } // weak：光らないが、クリックはできる枠（エールが足りないアーツを、確認のうえで使うホロメン）
 
 // アニメーション。shuffle: そのゾーンのカードをシャッフルする動き／down: ダメージで倒されたホロメンが、アーカイブへ飛んでいく動き
 export type PlayFxInput = { kind: 'shuffle'; zone: ZoneId } | { kind: 'down' | 'fly'; from: ZoneId; to: ZoneId; card: DeckCard } | { kind: 'bloom'; zone: ZoneId; stage: BloomStage; label: string } | { kind: 'attack'; from: ZoneId; to: ZoneId; amount: number; art?: string; parts?: string } | { kind: 'hit'; zone: ZoneId; amount: number } // attack：アーツの攻撃（矢印とダメージが、攻撃する枠から、相手の枠へ飛ぶ。相手の画面にも送る）／hit：ダメージを受けた枠の、演出（盤面の変化から、それぞれの画面で出す）／ bloom：ブルームした枠の、演出（相手の画面へは送らない。それぞれの画面で、盤面の変化から出す） // fly：カードが、1枚、別のゾーンへ飛んでいく（ホロパワーのアーカイブなど）
@@ -455,13 +455,14 @@ function ZoneView({ def, side, p }: { def: ZoneDef; side: Side; p: BoardProps })
     p.onOpenZone(id)
   }
   const cards = p.state[id]
-  const grayedOut = p.turn.active !== side && (def.key === 'deck' || def.key === 'yellDeck' || def.key === 'handHolder')
+  const grayedOut = p.turn.active !== side && (def.key === 'deck' || def.key === 'yellDeck')
   const blockedSlot = slotBlocked(p.state, id, null) // バックとコラボが5枚で、空いている枠は、使えない
   const oshiSkills = def.key === 'oshi' && cards.length > 0 ? p.oshiSkills[side] : []
   const showSkills = oshiSkills.length > 0
   const allowed = dropAllowed(p.drag, id, p.state)
   const over = allowed && p.overZone === id
-  const picking = !!p.pick && p.pick.zones.includes(id) // 選んでもらう枠（光らせて、クリックで選べる）
+  const glowing = !!p.pick && p.pick.zones.includes(id) // 選んでもらう枠（光らせて、クリックで選べる）
+  const picking = glowing || (!!p.pick && !!p.pick.weak?.includes(id)) // 光らせないが、クリックで選べる枠もある
   const pickColor = p.pick?.color ?? '#ffd76a'
   const isDeck = def.key === 'deck'
   const top = cards[cards.length - 1]
@@ -626,16 +627,16 @@ function ZoneView({ def, side, p }: { def: ZoneDef; side: Side; p: BoardProps })
               height="42"
               viewBox="0 0 44 40"
               aria-label="登場したターン"
-              style={{ position: 'absolute', right: 6, bottom: parts.yells.length > 0 ? yellSize + 16 : 8, zIndex: 11, pointerEvents: 'none' }}
+              style={{ position: 'absolute', right: 6, bottom: 8, zIndex: 11, pointerEvents: 'none' }}
             >
               <path d="M22 3 L41 37 H3 Z" fill="#facc15" stroke="#92400e" strokeWidth="3" strokeLinejoin="round" />
               <rect x="20" y="14" width="4" height="12" rx="2" fill="#78350f" />
               <circle cx="22" cy="31" r="2.5" fill="#78350f" />
             </svg>
           )}
-          {/* つけているエール：カードの下に、1列で並べる（多いときは、少しずつ重ねる） */}
+          {/* つけているエール：カードの画像の外側（すぐ下）に、1列で並べる（多いときは、少しずつ重ねる） */}
           {parts.yells.length > 0 && (
-            <div style={{ position: 'absolute', left: 8, right: 8, bottom: 8, height: yellSize, zIndex: 9, pointerEvents: 'none' }}>
+            <div style={{ position: 'absolute', left: 8, right: 8, top: h - 2, height: yellSize, zIndex: 9, pointerEvents: 'none' }}>
               {parts.yells.map((y, i) => (
                 <YellIcon key={y.uid} pc={y} size={yellSize} left={i * yellStep} z={i + 1} p={p} />
               ))}
@@ -678,6 +679,16 @@ function ZoneView({ def, side, p }: { def: ZoneDef; side: Side; p: BoardProps })
       // 横向きのゾーン（パワー）は、カードを90度回して、ゾーンにぴったり収める
       const cw = def.landscape ? h - 6 : w - 6
       const ch = def.landscape ? w - 6 : h - 6
+      // エールステップ：ターンを進めている側の、エールデッキのいちばん上のカードを、表向きにして見せる（これから、つけるカード）
+      const showYellTop = def.key === 'yellDeck' && p.turn.phase === 'yell' && p.turn.active === side
+      if (showYellTop) {
+        return (
+          <div style={{ position: 'absolute', left: (w - 6 - cw) / 2, top: (h - 6 - ch) / 2, outline: '4px solid #4ce0e6', outlineOffset: 0, borderRadius: 8, boxShadow: '0 0 22px #4ce0e6' }}>
+            <CardView pc={{ ...top, faceDown: false }} w={cw} h={ch} selected={false} draggable p={p} onClickOverride={openZone} onDoubleClickOverride={openViewer} />
+            <span style={{ position: 'absolute', right: 6, bottom: 6, padding: '0 10px', borderRadius: 999, background: 'rgba(10,15,30,0.92)', color: '#fff', fontWeight: 800, fontSize: 24, pointerEvents: 'none' }}>×{cards.length}</span>
+          </div>
+        )
+      }
       return (
         <div style={{ position: 'absolute', left: (w - 6 - cw) / 2, top: (h - 6 - ch) / 2, transform: def.landscape ? 'rotate(90deg)' : undefined }}>
           <CardView backKey={def.key} backCount={cards.length} backRotate={def.landscape} pc={top} w={cw} h={ch} selected={false} draggable p={p} onClickOverride={openZone} onDoubleClickOverride={isDeck || def.key === 'yellDeck' ? openViewer : undefined} />
@@ -794,9 +805,9 @@ function ZoneView({ def, side, p }: { def: ZoneDef; side: Side; p: BoardProps })
           border: `3px solid ${def.color}`,
           background: `${def.color}2e`,
           borderRadius: 12,
-          boxShadow: over ? '0 0 0 6px var(--hud-cyan), 0 0 24px var(--hud-cyan)' : picking ? `0 0 0 4px ${pickColor}, 0 0 34px ${pickColor}` : 'none',
+          boxShadow: over ? '0 0 0 6px var(--hud-cyan), 0 0 24px var(--hud-cyan)' : glowing ? `0 0 0 4px ${pickColor}, 0 0 34px ${pickColor}` : 'none',
           // 移動先を選んでいるあいだは、全部のゾーンを、黄色い点線で示す
-          outline: p.moveMode ? '5px dashed #ffd76a' : picking ? `6px solid ${pickColor}` : 'none',
+          outline: p.moveMode ? '5px dashed #ffd76a' : glowing ? `6px solid ${pickColor}` : 'none',
           outlineOffset: 2,
           cursor: p.moveMode || picking || def.kind === 'pile' || def.kind === 'life' ? 'pointer' : 'default',
         }}

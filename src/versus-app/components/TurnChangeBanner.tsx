@@ -6,7 +6,7 @@ import type { Side } from '../utils/playfield'
 export function TurnChangeBanner({ side, title, sub, label = 'TURN CHANGE', fast = false, onDone }: { side: Side; title: string; sub: string; label?: string; fast?: boolean; onDone: () => void }) {
   const accent = side === 'me' ? '#4ce0e6' : '#ff7066'
   return (
-    <div aria-hidden="true" className="pointer-events-none fixed inset-x-0 top-1/2 z-[115] -translate-y-1/2 overflow-hidden">
+    <div aria-hidden="true" className="pointer-events-none fixed inset-x-0 top-[45%] z-[115] -translate-y-1/2 overflow-hidden">
       <style>{`
 @keyframes tc-slide{
   0%{transform:translate3d(105vw,0,0);animation-timing-function:cubic-bezier(.16,1,.3,1)}

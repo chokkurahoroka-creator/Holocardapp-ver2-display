@@ -21,7 +21,8 @@ function makePieces(n: number): Piece[] {
   }))
 }
 
-export function VictoryModal({ name, subtitle, onClose }: { name: string; subtitle: string; onClose: () => void }) {
+// onRematch：対戦ルームのとき、「再戦」（デッキ選択から、もう一度始める）を出す
+export function VictoryModal({ name, subtitle, onClose, onRematch }: { name: string; subtitle: string; onClose: () => void; onRematch?: () => void }) {
   const [pieces] = useState(() => makePieces(36))
 
   useEffect(() => {
@@ -104,8 +105,13 @@ export function VictoryModal({ name, subtitle, onClose }: { name: string; subtit
             {name} Win
           </h2>
           <p className="vm-rise relative mt-3 text-sm text-[#f1e3b0]">{subtitle}</p>
-          <div className="vm-rise relative mt-6">
-            <button type="button" className="btn-primary !px-8 !py-2 text-base" onClick={onClose} autoFocus>
+          <div className="vm-rise relative mt-6 flex flex-wrap items-center justify-center gap-3">
+            {onRematch && (
+              <button type="button" className="btn-primary !px-8 !py-2 text-base" onClick={onRematch} autoFocus title="デッキ選択から、もう一度始めます（相手の画面も、デッキ選択に戻ります）">
+                再戦
+              </button>
+            )}
+            <button type="button" className={onRematch ? 'btn-secondary !px-8 !py-2 text-base' : 'btn-primary !px-8 !py-2 text-base'} onClick={onClose} autoFocus={!onRematch}>
               閉じる
             </button>
           </div>
