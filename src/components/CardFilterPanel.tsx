@@ -8,7 +8,9 @@ import {
   activeFilterChips,
   distinctAttributes,
   distinctBatonTouch,
-  distinctCardTypes,
+  SUPPORT_GROUP,
+  cardTypeOptions,
+  effectiveCardTypes,
   distinctSkillTypes,
   distinctSpecialAttackColors,
   distinctRarities,
@@ -457,7 +459,8 @@ export function CardFilterPanel({ cards, filters, onChange, sets, onClose, resul
   const batonTouchValues = distinctBatonTouch(cards).map(String)
   const attributes = distinctAttributes(cards)
   const specialAttackColors = distinctSpecialAttackColors(cards)
-  const cardTypes = distinctCardTypes(cards)
+  const { main: cardTypes, supportSubs } = cardTypeOptions(cards)
+  const supportOn = filters.cardTypes.includes(SUPPORT_GROUP)
   const stages = distinctStages(cards)
   const rarities = distinctRarities(cards)
   const { min: hpMinBound, max: hpMaxBound } = hpBounds(cards)
@@ -514,8 +517,25 @@ export function CardFilterPanel({ cards, filters, onChange, sets, onClose, resul
       )}
 
       {cardTypes.length > 0 && (
-        <Section label="カード種類" count={filters.cardTypes.length} collapsible={asSheet} logic={groupLogicProps('cardTypes')}>
-          <PillGroup options={cardTypes} selected={filters.cardTypes} onToggle={(v) => onChange({ ...filters, cardTypes: toggle(filters.cardTypes, v) })} />
+        <Section label="カード種類" count={effectiveCardTypes(filters.cardTypes).length} collapsible={asSheet} logic={groupLogicProps('cardTypes')}>
+          <PillGroup
+            options={cardTypes}
+            selected={filters.cardTypes}
+            onToggle={(v) => {
+              // 「サポート」を外すときは、選んでいた詳細も、まとめて外す
+              if (v === SUPPORT_GROUP && supportOn) onChange({ ...filters, cardTypes: filters.cardTypes.filter((t) => !t.startsWith('サポート')) })
+              else onChange({ ...filters, cardTypes: toggle(filters.cardTypes, v) })
+            }}
+          />
+          {/* サポートを選ぶと、詳細のサブメニューが開く。詳細を選ばなければ、すべてのサポートが対象 */}
+          {supportOn && supportSubs.length > 0 && (
+            <div className="fp-sub" style={{ marginTop: 8, padding: '8px 10px', borderLeft: '2px solid var(--hud-cyan)', background: 'rgba(76,224,230,0.06)', borderRadius: '0 6px 6px 0' }}>
+              <div style={{ fontSize: 11, color: 'var(--hud-ink-dim)', marginBottom: 6 }} title="詳細を選ばないときは、すべてのサポートが対象です">
+                サポートの詳細
+              </div>
+              <PillGroup options={supportSubs} selected={filters.cardTypes} onToggle={(v) => onChange({ ...filters, cardTypes: toggle(filters.cardTypes, v) })} />
+            </div>
+          )}
         </Section>
       )}
 

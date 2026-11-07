@@ -200,6 +200,31 @@ export function distinctCardTypes(cards: Card[]): string[] {
   return values.sort((a, b) => cardTypeRank(a) - cardTypeRank(b) || a.localeCompare(b, 'ja'))
 }
 
+// サポートは、1つの項目「サポート」にまとめる。「サポート」だけを選ぶと、すべてのサポート（イベント・アイテム・スタッフ…）が対象。
+// 「サポート」を選んだうえで、詳細（サポート・アイテムなど）を選ぶと、その詳細だけに絞る（filters.cardTypes には、「サポート」と詳細の両方が入る）
+export const SUPPORT_GROUP = 'サポート'
+export const isSupportType = (t: string | null | undefined): boolean => !!t && t.startsWith('サポート')
+
+// フィルターの選択肢：メイン（サポートは1つにまとめる）と、サポートの詳細
+export function cardTypeOptions(cards: Card[]): { main: string[]; supportSubs: string[] } {
+  const all = distinctCardTypes(cards)
+  const main: string[] = []
+  let supportAdded = false
+  for (const t of all) {
+    if (isSupportType(t)) {
+      if (!supportAdded) main.push(SUPPORT_GROUP)
+      supportAdded = true
+    } else main.push(t)
+  }
+  return { main, supportSubs: all.filter((t) => isSupportType(t) && t !== SUPPORT_GROUP) }
+}
+
+// 実際に絞り込みに使う種類（「サポート」と詳細の両方が選ばれているときは、詳細だけ）
+export function effectiveCardTypes(values: string[]): string[] {
+  const hasSub = values.some((v) => v !== SUPPORT_GROUP && isSupportType(v))
+  return hasSub ? values.filter((v) => v !== SUPPORT_GROUP) : values
+}
+
 // ---- レアリティ ----
 // カードのレアリティを、フィルターの選択肢に直す（大文字にそろえる。空のカードは「その他」。並び替えの「その他」の扱いと同じ）
 export function cardRarityKey(c: Card): string {
@@ -247,9 +272,9 @@ function hpInRange(c: Card, filters: CardFilters): boolean {
 }
 
 // 項目（カード色・タグなど）ごとの、現在の項目内の組み合わせ方。選んでいない項目は、項目どうしの組み合わせ方（logic）と同じ
-// ただし、レアリティは、1枚のカードに1つしかないので、複数選んだときは、既定で「どれか」（OR）にする（ANDだと、必ず0件になるため）。切り替えは、できる
+// ただし、レアリティとカード種類は、1枚のカードに1つしかないので、複数選んだときは、既定で「どれか」（OR）にする（ANDだと、必ず0件になるため）。切り替えは、できる
 export function effectiveGroupLogic(filters: CardFilters, key: GroupKey): FilterLogic {
-  return filters.groupLogic[key] ?? (key === 'rarities' ? 'or' : filters.logic)
+  return filters.groupLogic[key] ?? (key === 'rarities' || key === 'cardTypes' ? 'or' : filters.logic)
 }
 
 // 選択された条件を、項目ごとにまとめて、値ごとの判定を並べる（項目内のAND/ORは、この配列単位で適用する）
@@ -265,7 +290,7 @@ function checkGroups(c: Card, filters: CardFilters): CheckGroup[] {
   add('batonTouches', filters.batonTouches, (v) => String(batonTouchValue(c)) === v)
   add('attributes', filters.attributes, (v) => attributeMatches(c.attribute, v))
   add('specialAttackColors', filters.specialAttackColors, (v) => cardSpecialAttackColors(c).includes(v))
-  add('cardTypes', filters.cardTypes, (v) => c.card_type === v)
+  add('cardTypes', effectiveCardTypes(filters.cardTypes), (v) => (v === SUPPORT_GROUP ? isSupportType(c.card_type) : c.card_type === v))
   add('stages', filters.stages, (v) => c.stage === v)
   add('rarities', filters.rarities, (v) => cardRarityKey(c) === v)
   add('setCodes', filters.setCodes, (v) => c.set_code === v)
@@ -317,7 +342,7 @@ export function activeFilterChips(filters: CardFilters): { category: keyof CardF
   filters.batonTouches.forEach((v) => chips.push({ category: 'batonTouches', value: v, label: `バトンタッチ: ${v}` }))
   filters.attributes.forEach((v) => chips.push({ category: 'attributes', value: v, label: `カード色: ${v}` }))
   filters.specialAttackColors.forEach((v) => chips.push({ category: 'specialAttackColors', value: v, label: `特攻色: ${v}` }))
-  filters.cardTypes.forEach((v) => chips.push({ category: 'cardTypes', value: v, label: `カード種類: ${v}` }))
+  effectiveCardTypes(filters.cardTypes).forEach((v) => chips.push({ category: 'cardTypes', value: v, label: `カード種類: ${v}` })) // 「サポート」と詳細が両方あるときは、詳細だけ
   filters.stages.forEach((v) => chips.push({ category: 'stages', value: v, label: `進化レベル: ${v}` }))
   filters.rarities.forEach((v) => chips.push({ category: 'rarities', value: v, label: `レアリティ: ${v}` }))
   filters.setCodes.forEach((v) => chips.push({ category: 'setCodes', value: v, label: `弾: ${v}` }))
