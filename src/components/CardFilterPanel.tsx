@@ -11,6 +11,7 @@ import {
   distinctCardTypes,
   distinctSkillTypes,
   distinctSpecialAttackColors,
+  distinctRarities,
   distinctStages,
   activeGroupCount,
   effectiveGroupLogic,
@@ -458,6 +459,7 @@ export function CardFilterPanel({ cards, filters, onChange, sets, onClose, resul
   const specialAttackColors = distinctSpecialAttackColors(cards)
   const cardTypes = distinctCardTypes(cards)
   const stages = distinctStages(cards)
+  const rarities = distinctRarities(cards)
   const { min: hpMinBound, max: hpMaxBound } = hpBounds(cards)
 
   const logicGroups = activeGroupCount(filters) // 条件のある項目の数（区分はAND/ORの対象外）
@@ -492,6 +494,12 @@ export function CardFilterPanel({ cards, filters, onChange, sets, onClose, resul
       <Section label="区分" count={filters.types.length} collapsible={asSheet} defaultOpen>
         <PillGroup options={CARD_KIND_OPTIONS} selected={filters.types} onToggle={(v) => onChange({ ...filters, types: toggle(filters.types, v) })} />
       </Section>
+
+      {rarities.length > 0 && (
+        <Section label="レアリティ" count={filters.rarities.length} collapsible={asSheet} logic={groupLogicProps('rarities')} defaultOpen>
+          <PillGroup options={rarities} selected={filters.rarities} onToggle={(v) => onChange({ ...filters, rarities: toggle(filters.rarities, v) })} />
+        </Section>
+      )}
 
       {attributes.length > 0 && (
         <Section label="カード色" count={filters.attributes.length} collapsible={asSheet} logic={groupLogicProps('attributes')} defaultOpen>

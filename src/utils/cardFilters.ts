@@ -1,4 +1,5 @@
 import type { Card } from '../types/card'
+import { RARITY_ORDER, rarityOrderIndex } from './sortCards'
 
 // AND/ORの組み合わせ方は、2段階：
 //  ・項目内（groupLogic）：1つの項目（カード色・タグなど）の中で、選んだ値をどう組み合わせるか。
@@ -10,7 +11,7 @@ import type { Card } from '../types/card'
 export type FilterLogic = 'and' | 'or'
 
 // 項目内のAND/ORを選べる項目
-export type GroupKey = 'skillTypes' | 'tags' | 'batonTouches' | 'attributes' | 'specialAttackColors' | 'cardTypes' | 'stages' | 'setCodes'
+export type GroupKey = 'skillTypes' | 'tags' | 'batonTouches' | 'attributes' | 'specialAttackColors' | 'cardTypes' | 'stages' | 'rarities' | 'setCodes'
 export type GroupLogic = Partial<Record<GroupKey, FilterLogic>>
 
 export type CardFilters = {
@@ -28,6 +29,7 @@ export type CardFilters = {
   specialAttackColors: string[] // 特攻対象色（アーツの特攻の色）
   cardTypes: string[]
   stages: string[]
+  rarities: string[] // レアリティ（SR・UR など）。レアリティが空のカードは「その他」として扱う
   setCodes: string[] // 「全カード検索」ページでのみ使用（カード一覧側は常に空）
 }
 
@@ -44,6 +46,7 @@ export const EMPTY_FILTERS: CardFilters = {
   specialAttackColors: [],
   cardTypes: [],
   stages: [],
+  rarities: [],
   setCodes: [],
 }
 
@@ -197,6 +200,23 @@ export function distinctCardTypes(cards: Card[]): string[] {
   return values.sort((a, b) => cardTypeRank(a) - cardTypeRank(b) || a.localeCompare(b, 'ja'))
 }
 
+// ---- レアリティ ----
+// カードのレアリティを、フィルターの選択肢に直す（大文字にそろえる。空のカードは「その他」。並び替えの「その他」の扱いと同じ）
+export function cardRarityKey(c: Card): string {
+  return (c.rarity ?? '').toUpperCase().trim() || 'その他'
+}
+
+// 一覧にあるレアリティだけを、レアリティ順（SEC → … → C → P → その他）で並べる。決まった順にない値は、最後に名前順
+export function distinctRarities(cards: Card[]): string[] {
+  const values = Array.from(new Set(cards.map(cardRarityKey)))
+  const known = (v: string) => RARITY_ORDER.includes(v)
+  return values.sort((a, b) => {
+    if (known(a) && known(b)) return rarityOrderIndex(a) - rarityOrderIndex(b)
+    if (known(a) !== known(b)) return known(a) ? -1 : 1
+    return a.localeCompare(b, 'ja')
+  })
+}
+
 // ---- 進化レベル ----
 const STAGE_ORDER = ['debut', '1st', '2nd', 'spot']
 
@@ -227,8 +247,9 @@ function hpInRange(c: Card, filters: CardFilters): boolean {
 }
 
 // 項目（カード色・タグなど）ごとの、現在の項目内の組み合わせ方。選んでいない項目は、項目どうしの組み合わせ方（logic）と同じ
+// ただし、レアリティは、1枚のカードに1つしかないので、複数選んだときは、既定で「どれか」（OR）にする（ANDだと、必ず0件になるため）。切り替えは、できる
 export function effectiveGroupLogic(filters: CardFilters, key: GroupKey): FilterLogic {
-  return filters.groupLogic[key] ?? filters.logic
+  return filters.groupLogic[key] ?? (key === 'rarities' ? 'or' : filters.logic)
 }
 
 // 選択された条件を、項目ごとにまとめて、値ごとの判定を並べる（項目内のAND/ORは、この配列単位で適用する）
@@ -246,6 +267,7 @@ function checkGroups(c: Card, filters: CardFilters): CheckGroup[] {
   add('specialAttackColors', filters.specialAttackColors, (v) => cardSpecialAttackColors(c).includes(v))
   add('cardTypes', filters.cardTypes, (v) => c.card_type === v)
   add('stages', filters.stages, (v) => c.stage === v)
+  add('rarities', filters.rarities, (v) => cardRarityKey(c) === v)
   add('setCodes', filters.setCodes, (v) => c.set_code === v)
   // HPの範囲は、1つの条件（項目内の組み合わせは、関係ない）
   if (filters.hpMin || filters.hpMax) groups.push({ logic: filters.logic, checks: [hpInRange(c, filters)] })
@@ -265,7 +287,7 @@ export function applyCardFilters(cards: Card[], filters: CardFilters): Card[] {
 
 // 条件のある項目の数（HPの範囲も1項目。区分は、AND/ORの対象外）。2つ以上あるときに、項目どうしのAND/ORが意味を持つ
 export function activeGroupCount(filters: CardFilters): number {
-  const lists: string[][] = [filters.skillTypes, filters.tags, filters.batonTouches, filters.attributes, filters.specialAttackColors, filters.cardTypes, filters.stages, filters.setCodes]
+  const lists: string[][] = [filters.skillTypes, filters.tags, filters.batonTouches, filters.attributes, filters.specialAttackColors, filters.cardTypes, filters.stages, filters.rarities, filters.setCodes]
   return lists.filter((l) => l.length > 0).length + (filters.hpMin || filters.hpMax ? 1 : 0)
 }
 
@@ -281,6 +303,7 @@ export function hasActiveFilters(filters: CardFilters): boolean {
     filters.specialAttackColors.length > 0 ||
     filters.cardTypes.length > 0 ||
     filters.stages.length > 0 ||
+    filters.rarities.length > 0 ||
     filters.setCodes.length > 0
   )
 }
@@ -296,6 +319,7 @@ export function activeFilterChips(filters: CardFilters): { category: keyof CardF
   filters.specialAttackColors.forEach((v) => chips.push({ category: 'specialAttackColors', value: v, label: `特攻色: ${v}` }))
   filters.cardTypes.forEach((v) => chips.push({ category: 'cardTypes', value: v, label: `カード種類: ${v}` }))
   filters.stages.forEach((v) => chips.push({ category: 'stages', value: v, label: `進化レベル: ${v}` }))
+  filters.rarities.forEach((v) => chips.push({ category: 'rarities', value: v, label: `レアリティ: ${v}` }))
   filters.setCodes.forEach((v) => chips.push({ category: 'setCodes', value: v, label: `弾: ${v}` }))
   if (filters.hpMin || filters.hpMax) {
     chips.push({ category: 'hpMin', value: '__hp__', label: `HP: ${filters.hpMin || '0'}〜${filters.hpMax || '∞'}` })

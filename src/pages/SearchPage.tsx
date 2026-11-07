@@ -105,7 +105,7 @@ export function SearchPage() {
       <SiteNav />
 
       {/* 1行目: 検索バー（このページには開閉するパネルが無いため、メニューのタブは出さない）。2行目: カード（並び替え・昇降順・フィルター）とパック（並び順・区切り）のまとまり */}
-      <ControlsBar search={<SearchBox value={searchQuery} onChange={setSearchQuery} placeholder="カード名・タグ・キーワードで検索（全弾対象）" />}>
+      <ControlsBar search={<SearchBox value={searchQuery} onChange={setSearchQuery} placeholder="カード名・タグ・キーワード（全弾対象・スペースで複数）" />}>
         <ControlGroup kind="card">
           <select className="field" value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
             <option value="overall">カード番号順</option>

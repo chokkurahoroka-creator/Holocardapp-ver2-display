@@ -7,14 +7,15 @@ type Props = {
 }
 
 // 検索バー（メニューの右横に置く）。入力があるときは、消す「×」を右端に出す
-export function SearchBox({ value, onChange, placeholder = 'カード名・タグ・キーワードで検索' }: Props) {
+export function SearchBox({ value, onChange, placeholder = 'カード名・タグ・キーワード（スペースで複数）' }: Props) {
   const isMobile = useIsMobile()
   return (
     <div style={{ position: 'relative', flex: '1 1 auto', minWidth: 0 }}>
       <input
         className="field"
         type="text"
-        placeholder={isMobile ? 'カード名・タグで検索' : placeholder}
+        placeholder={isMobile ? 'カード名・タグ（スペースで複数）' : placeholder}
+        title="スペースで区切ると、すべての言葉を含むカードを検索します"
         aria-label="カード検索"
         value={value}
         onChange={(e) => onChange(e.target.value)}
