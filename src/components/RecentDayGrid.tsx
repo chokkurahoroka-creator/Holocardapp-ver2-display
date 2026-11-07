@@ -53,7 +53,8 @@ export function RecentDayGrid({ cards, setNameByCode, tileScale = 1, onCardClick
   }
 
   const chipFont = layout.chipFont
-  const stripHeight = Math.round(chipFont * 1.25) + 7 // タグ1行分の高さ（全カードで同じにして、行の高さをそろえる）
+  const mobile = layout.columns !== null // スマホは、タグの枠（高さ・余白）も、小さくする
+  const stripHeight = Math.round(chipFont * 1.25) + (mobile ? 4 : 7) // タグ1行分の高さ（全カードで同じにして、行の高さをそろえる）
 
   return (
     <div
@@ -102,8 +103,8 @@ export function RecentDayGrid({ cards, setNameByCode, tileScale = 1, onCardClick
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
-                    padding: `0 ${Math.max(3, Math.round(chipFont * 0.5))}px`,
-                    borderRadius: '5px 5px 0 0',
+                    padding: `0 ${Math.max(2, Math.round(chipFont * (mobile ? 0.35 : 0.5)))}px`,
+                    borderRadius: mobile ? '3px 3px 0 0' : '5px 5px 0 0',
                     background: color,
                     color: '#04232a',
                     fontSize: chipFont,
@@ -125,7 +126,6 @@ export function RecentDayGrid({ cards, setNameByCode, tileScale = 1, onCardClick
               selected={selectedIds.has(card.id)}
               onToggleSelect={onToggleSelect}
               compact={layout.compact}
-              hideFav={layout.hideFav}
             />
           </div>
         )

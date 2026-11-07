@@ -84,7 +84,6 @@ export function SlotGrid({
             selected={selectedIds.has(it.card.id)}
             onToggleSelect={onToggleSelect}
             compact={layout.compact}
-            hideFav={layout.hideFav}
           />
         ) : (
           <div

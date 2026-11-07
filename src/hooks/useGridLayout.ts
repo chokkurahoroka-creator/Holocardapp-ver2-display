@@ -25,7 +25,6 @@ export type GridLayout = {
   gridTemplateColumns: string
   gap: number
   compact: boolean // trueのとき、タイル下部のテキスト情報を省いてコンパクトに表示する
-  hideFav: boolean // trueのとき、カードが小さすぎるので、お気に入りの★ボタンを出さない
   chipFont: number // 並び替えの区切り線に付けるタグの文字サイズ（px）。カードのズームに合わせて変わる
   columns: number | null // スマホの列数（PCは表示幅で決まるので null）
   tileMin: number // PCのカード1枚の最小幅（px）。スマホでは使わない
@@ -45,10 +44,8 @@ export function useGridLayout(tileScale: number): GridLayout {
       // カードが小さくなる（列が増える）ほど、隣との隙間を狭くする：2列以下=12px、3列=8px、4列=6px、5列=4px、6列=3px、7列以上=2px
       gap: columns <= 2 ? 12 : columns === 3 ? 8 : columns === 4 ? 6 : columns === 5 ? 4 : columns === 6 ? 3 : 2,
       compact: columns >= 3,
-      // 5列以上（既定の4列より小さく表示）になったら、★は小さすぎて押しにくく、画像も隠すので非表示にする
-      hideFav: columns >= 5,
-      // 列が増えるほど（カードが小さいほど）、文字も小さくする：3列=16px、4列=13px、5列=10px、6列以上=9px以下
-      chipFont: Math.max(7, Math.min(16, Math.round(52 / columns))),
+      // 区切りのタグの文字：列が増えるほど（カードが小さいほど）小さくする。2〜3列=11px、4列=10px、5列=8px、6列以上=7px
+      chipFont: Math.max(7, Math.min(11, Math.round(38 / columns))),
       columns,
       tileMin: 0,
     }
@@ -61,7 +58,6 @@ export function useGridLayout(tileScale: number): GridLayout {
     gridTemplateColumns: `repeat(auto-fill, minmax(clamp(${Math.round(110 * tileScale)}px, 40vw, ${Math.round(160 * tileScale)}px), 1fr))`,
     gap: 12,
     compact: tileScale < 0.75,
-    hideFav: tileScale < 0.6,
     chipFont: Math.max(9, Math.min(18, Math.round(16 * tileScale))),
     columns: null,
     tileMin,

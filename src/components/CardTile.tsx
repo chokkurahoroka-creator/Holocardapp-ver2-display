@@ -12,11 +12,10 @@ type Props = {
   selectionMode: boolean
   selected: boolean
   onToggleSelect: (card: Card) => void
-  compact?: boolean // 小さい表示サイズ・スマホの多列表示のとき、下部のテキスト情報を非表示にして余白も詰める
-  hideFav?: boolean // カードが小さいとき、お気に入りの★ボタンを非表示にする（一括選択モードのチェックは常に表示）
+  compact?: boolean // 小さい表示サイズ・スマホの多列表示のとき、下部のテキスト情報（カード種類・お気に入りの★）を非表示にして余白も詰める
 }
 
-export function CardTile({ card, onClick, isFav, onToggleFav, selectionMode, selected, onToggleSelect, compact = false, hideFav = false }: Props) {
+export function CardTile({ card, onClick, isFav, onToggleFav, selectionMode, selected, onToggleSelect, compact = false }: Props) {
   const badgeColor = getRarityConfig(card.rarity).badgeColor
   const isNew = isNewCard(card) // 登録から5日以内のカードは、赤枠と「NEW!」で目立たせる
 
@@ -78,32 +77,7 @@ export function CardTile({ card, onClick, isFav, onToggleFav, selectionMode, sel
         >
           {selected ? '✓' : ''}
         </div>
-      ) : hideFav ? null : (
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            onToggleFav(card, e)
-          }}
-          style={{
-            position: 'absolute',
-            top: compact ? 4 : 10,
-            left: compact ? 4 : 10,
-            zIndex: 2,
-            background: 'rgba(6,18,23,0.7)',
-            border: '1px solid var(--hud-line)',
-            borderRadius: '50%',
-            width: compact ? 20 : 28,
-            height: compact ? 20 : 28,
-            color: isFav ? 'var(--hud-cyan)' : '#fff',
-            fontSize: compact ? 11 : 16,
-            lineHeight: 1,
-            cursor: 'pointer',
-            padding: 0,
-          }}
-        >
-          {isFav ? '★' : '☆'}
-        </button>
-      )}
+      ) : null}
 
       <div style={{ padding: compact ? 0 : 6 }}>{card.image_url && renderRarityFrame(card.image_url, card.card_name, card.rarity)}</div>
 
@@ -134,6 +108,33 @@ export function CardTile({ card, onClick, isFav, onToggleFav, selectionMode, sel
               >
                 {card.card_type}
               </div>
+            )}
+            {/* お気に入りの★：カード種類の右（行の右端）。小さめ。カード種類と一緒に、compact のときは出さない。一括選択中は、出さない */}
+            {!selectionMode && (
+              <button
+                type="button"
+                title={isFav ? 'お気に入りを外す' : 'お気に入りに追加'}
+                aria-label={isFav ? 'お気に入りを外す' : 'お気に入りに追加'}
+                aria-pressed={isFav}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onToggleFav(card, e)
+                }}
+                style={{
+                  marginLeft: 'auto',
+                  flexShrink: 0,
+                  background: 'transparent',
+                  border: 'none',
+                  color: isFav ? 'var(--hud-cyan)' : 'var(--hud-ink-dim)',
+                  fontSize: 13,
+                  lineHeight: 1,
+                  cursor: 'pointer',
+                  padding: '2px 2px',
+                  touchAction: 'manipulation',
+                }}
+              >
+                {isFav ? '★' : '☆'}
+              </button>
             )}
           </div>
         </div>

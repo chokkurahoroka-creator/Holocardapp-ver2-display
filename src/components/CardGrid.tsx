@@ -66,7 +66,7 @@ export function CardGrid({ cards, onCardClick, isFav, onToggleFav, selectionMode
                   top: 0,
                   bottom: 0,
                   left: -(layout.gap / 2) - 1,
-                  width: 2,
+                  width: layout.columns !== null ? 1.5 : 2,
                   borderRadius: 1,
                   background: 'var(--hud-cyan)',
                   boxShadow: '0 0 6px var(--hud-cyan)',
@@ -82,8 +82,9 @@ export function CardGrid({ cards, onCardClick, isFav, onToggleFav, selectionMode
                     left: '50%',
                     transform: 'translate(-50%, -50%)',
                     // 文字サイズはカードのズームに合わせる。余白も文字の大きさに比例させる
-                    padding: `${Math.max(1, Math.round(layout.chipFont * 0.18))}px ${Math.max(2, Math.round(layout.chipFont * 0.4))}px`,
-                    borderRadius: 5,
+                    // スマホ（列数が決まっているとき）は、枠の余白も角も小さくする
+                    padding: layout.columns !== null ? `${Math.max(1, Math.round(layout.chipFont * 0.1))}px ${Math.max(2, Math.round(layout.chipFont * 0.28))}px` : `${Math.max(1, Math.round(layout.chipFont * 0.18))}px ${Math.max(2, Math.round(layout.chipFont * 0.4))}px`,
+                    borderRadius: layout.columns !== null ? 3 : 5,
                     background: 'var(--hud-cyan)',
                     color: '#04232a',
                     fontSize: layout.chipFont,
@@ -106,7 +107,6 @@ export function CardGrid({ cards, onCardClick, isFav, onToggleFav, selectionMode
               selected={selectedIds.has(card.id)}
               onToggleSelect={onToggleSelect}
               compact={layout.compact}
-              hideFav={layout.hideFav}
             />
           </div>
         )
