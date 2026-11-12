@@ -55,6 +55,13 @@ function HighlightNumbers({ text, color = '#ffd76a', glow = false }: { text: str
   )
 }
 
+// 推しホロメンのスキルは、推しステージスキル → 推しスキル → SP推しスキル の順に、上から並べる（それ以外のスキルは、登録された順のまま、そのあとに続く）
+const OSHI_SKILL_ORDER = ['推しステージスキル', '推しスキル', 'SP推しスキル']
+const oshiSkillRank = (skillType: string | undefined): number => {
+  const i = OSHI_SKILL_ORDER.indexOf(skillType ?? '')
+  return i === -1 ? OSHI_SKILL_ORDER.length : i
+}
+
 // エクストラ（固有スキル）は金色の枠で表示する
 const EXTRA_SKILL_TYPE = 'エクストラ'
 const GOLD = '#ffc83d'
@@ -80,13 +87,36 @@ export function ArtsSkillsView({ card }: Props) {
   const badgeSize = isMobile ? 11 : 13
   const yellSize = isMobile ? 24 : 32 // アーツに必要なエール画像の大きさ
   const bannerHeight = isMobile ? 28 : 38 // スキル種別バナー画像の高さ
-  const skills = ((card.skills_json ?? []) as SkillRow[]).filter((s) => s && (s.title || s.text))
+  // sort は、同じ順位のスキルの順番を変えない（安定）
+  const skills = ((card.skills_json ?? []) as SkillRow[]).filter((s) => s && (s.title || s.text)).sort((a, b) => oshiSkillRank(a.skillType) - oshiSkillRank(b.skillType))
   const arts = ((card.arts_json ?? []) as ArtRow[]).filter((a) => a && (a.name || a.effectText || a.damage))
 
-  if (!skills.length && !arts.length) return null
+  if (!skills.length && !arts.length && !card.is_limited) return null
 
   return (
     <div>
+      {/* LIMITEDのカード：効果テキストの上に、赤い帯 */}
+      {card.is_limited && (
+        <div
+          role="note"
+          className="hud-mono"
+          style={{
+            marginTop: 12,
+            marginBottom: skills.length || arts.length ? 4 : 0,
+            padding: isMobile ? '4px 10px' : '6px 14px',
+            background: 'linear-gradient(90deg, #b91c1c, #ef4444 50%, #b91c1c)',
+            color: '#fff',
+            fontWeight: 800,
+            fontSize: isMobile ? 13 : 17,
+            letterSpacing: '0.14em',
+            textAlign: 'center',
+            borderRadius: 6,
+            boxShadow: '0 0 10px rgba(239,68,68,0.45)',
+          }}
+        >
+          [LIMITED]
+        </div>
+      )}
       {skills.length > 0 && (
         <div style={{ marginTop: 12 }}>
           {skills.map((s, i) => {
