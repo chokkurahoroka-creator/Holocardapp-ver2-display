@@ -1,11 +1,11 @@
 // このファイルは、管理画面（horoka-admin）から、同期したコピーです。直接は、直さないでください（node scripts/sync-versus.mjs で、上書きされます）。直すときは、管理画面側のファイルを直して、同期してください。
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useDeckCases, normalizeRecipe, EMPTY_RECIPE, type DeckCase } from '../hooks/useDeckCases'
+import { useDeckCases, normalizeRecipe, EMPTY_RECIPE, type DeckCase, type DeckRecipeX } from '../hooks/useDeckCases'
 import { searchDeckCards, DECK_SEARCH_LIMIT } from '../hooks/useDeckCards'
 import { useSetsAdmin, setLabel } from '../hooks/useSetsAdmin'
 import { fetchDecklog, parseDeckCode, resolveDecklog } from '../utils/decklog'
-import { insertByBasicOrder, orderedMain, type DeckCard, type DeckEntry, type DeckRecipe } from '../utils/deckImage'
+import { insertByBasicOrder, orderedMain, type DeckCard, type DeckEntry } from '../utils/deckImage'
 import type { RoleInfo } from '../utils/roles'
 
 // 対戦ページの「デッキ」タブ：デッキケースのように並べたギャラリー。
@@ -120,48 +120,175 @@ function CountStepper({ count, onChange }: { count: number; onChange: (delta: nu
   )
 }
 
+function StarButton({ on, onClick }: { on: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={on}
+      title={on ? '代表カードから外す' : '代表カードにする（最大3枚）'}
+      className={`h-8 w-8 shrink-0 rounded border text-base leading-none ${on ? 'border-[#ffd76a] bg-[#2a2408] text-[#ffd76a]' : 'border-[#2a4a52] text-[#6f9aa3] hover:border-[#ffd76a]'}`}
+    >
+      {on ? '★' : '☆'}
+    </button>
+  )
+}
+
 function countColor(n: number, target: number): string {
   return n === target ? '#3ddc97' : '#ffd76a'
 }
 
-// ---- ギャラリーの、デッキケース1個 ----
-function DeckCaseTile({ deck, onOpen }: { deck: DeckCase; onOpen: () => void }) {
-  const mainTotal = total(deck.recipe.main)
-  const yellTotal = total(deck.recipe.yells)
-  const complete = !!deck.recipe.oshi && mainTotal === MAIN_TARGET && yellTotal === YELL_TARGET
-  const img = deck.recipe.oshi?.image_url ?? deck.image_url ?? ''
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      title={`${deck.name}（クリックで詳細）`}
-      className="group min-w-0 overflow-hidden rounded-xl border-2 bg-[#0b1e26] text-left transition hover:-translate-y-0.5 hover:border-[#4ce0e6] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#4ce0e6]"
-      style={{ borderColor: complete ? 'rgba(61,220,151,0.55)' : 'var(--hud-line)' }}
-    >
-      {/* ケースのふた（デッキ名のラベル） */}
-      <div className="border-b border-[#2a4a52] bg-[#0f2a33] px-2 py-1.5">
-        <div className="truncate text-xs font-bold text-white">{deck.name}</div>
-      </div>
-      {/* ケースの窓（推しホロメン） */}
-      <div className="relative bg-[#071820]" style={{ aspectRatio: '63 / 80' }}>
-        {img ? <img src={img} alt="" loading="lazy" className="h-full w-full object-cover object-top" /> : <div className="flex h-full items-center justify-center text-[10px] text-[#9fc3ca]">推しホロメン未設定</div>}
-        <span className="absolute bottom-1 right-1 rounded px-1.5 py-0.5 text-[10px] font-bold" style={{ background: complete ? '#3ddc97' : '#ffd76a', color: '#04232a' }}>
-          {complete ? '完成' : '作成中'}
-        </span>
-      </div>
-      {/* ケースの底（枚数と、更新日時） */}
-      <div className="px-2 py-1.5">
-        <div className="hud-mono flex flex-wrap gap-x-2 text-[10px]">
-          <span style={{ color: countColor(mainTotal, MAIN_TARGET) }}>
-            メイン {mainTotal}/{MAIN_TARGET}
-          </span>
-          <span style={{ color: countColor(yellTotal, YELL_TARGET) }}>
-            エール {yellTotal}/{YELL_TARGET}
+// ---- デッキケースの見た目（色・写真・代表カード） ----
+const DEFAULT_CASE_COLOR = '#2a8aa0'
+const CASE_COLORS = ['#2a8aa0', '#243b6b', '#7b4fc9', '#e86fa6', '#c0392b', '#e6882e', '#d4b02a', '#2e9d6a', '#2b2f36', '#e8edf2']
+const SHOWCASE_MAX = 3
+const PHOTO_ASPECT = '63 / 76' // ケースの窓の縦横比（写真は、この形に切り抜く）
+
+function rgbOf(hex: string): [number, number, number] {
+  const n = parseInt(hex.slice(1), 16)
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+}
+function mix(hex: string, target: number, t: number): string {
+  const [r, g, b] = rgbOf(hex)
+  const f = (v: number) => Math.round(v + (target - v) * t)
+  return `rgb(${f(r)}, ${f(g)}, ${f(b)})`
+}
+const lighten = (hex: string, t: number) => mix(hex, 255, t)
+const darken = (hex: string, t: number) => mix(hex, 0, t)
+
+// 代表カード：選んだカード（デッキに入っているものだけ）。1枚も選んでいないときは、推し→メインの先頭から、自動で出す
+function showcaseCards(r: DeckRecipeX): DeckCard[] {
+  const all = new Map<number, DeckCard>()
+  if (r.oshi) all.set(r.oshi.id, r.oshi)
+  r.yells.forEach((e) => all.set(e.card.id, e.card))
+  r.main.forEach((e) => all.set(e.card.id, e.card))
+  const chosen = (r.showcase ?? []).map((id) => all.get(id)).filter((c): c is DeckCard => !!c && !!c.image_url)
+  if (chosen.length > 0) return chosen.slice(0, SHOWCASE_MAX)
+  const auto = [...(r.oshi ? [r.oshi] : []), ...orderedMain(r).map((e) => e.card)].filter((c) => !!c.image_url)
+  return auto.slice(0, SHOWCASE_MAX)
+}
+
+// 写真を、ケースの窓の形に切り抜いて、小さくする（保存データが重くならないように）
+async function fileToCoverDataUrl(file: File): Promise<string> {
+  if (!file.type.startsWith('image/')) throw new Error('画像ファイルを選んでください')
+  const url = URL.createObjectURL(file)
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const i = new Image()
+      i.onload = () => resolve(i)
+      i.onerror = () => reject(new Error('この画像は読み込めませんでした（JPEG・PNG・WebPなどを選んでください）'))
+      i.src = url
+    })
+    const W = 300
+    const H = Math.round((W * 76) / 63)
+    const canvas = document.createElement('canvas')
+    canvas.width = W
+    canvas.height = H
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('画像を処理できませんでした')
+    const scale = Math.max(W / img.width, H / img.height)
+    const w = img.width * scale
+    const h = img.height * scale
+    ctx.drawImage(img, (W - w) / 2, (H - h) / 2, w, h)
+    for (const q of [0.85, 0.75, 0.65, 0.5]) {
+      const d = canvas.toDataURL('image/jpeg', q)
+      if (d.length <= 60000) return d
+    }
+    return canvas.toDataURL('image/jpeg', 0.4)
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
+// 立体的なデッキケース1個。カーソルを乗せる（キーボードで選ぶ）と、少し起き上がって、代表カードが上に出る。
+// onOpen が無いときは、クリックできない見本（編集画面のプレビュー）になる
+function CaseArt({ recipe, name, updatedAt, onOpen }: { recipe: DeckRecipeX; name: string; updatedAt?: string; onOpen?: () => void }) {
+  const color = recipe.caseColor ?? DEFAULT_CASE_COLOR
+  const mainTotal = total(recipe.main)
+  const yellTotal = total(recipe.yells)
+  const complete = !!recipe.oshi && mainTotal === MAIN_TARGET && yellTotal === YELL_TARGET
+  const photo = recipe.casePhoto ?? ''
+  const img = photo || recipe.oshi?.image_url || ''
+  const fan = showcaseCards(recipe)
+
+  const shellStyle: React.CSSProperties = {
+    background: `linear-gradient(135deg, ${lighten(color, 0.3)} 0%, ${color} 42%, ${darken(color, 0.34)} 100%)`,
+    border: `1px solid ${darken(color, 0.5)}`,
+    // 厚みを、ずらした影で出す（右下に、4段）＋ 落ち影 ＋ ふちの光
+    boxShadow: [
+      `1px 1px 0 ${darken(color, 0.3)}`,
+      `2px 2px 0 ${darken(color, 0.38)}`,
+      `3px 3px 0 ${darken(color, 0.46)}`,
+      `4px 4px 0 ${darken(color, 0.54)}`,
+      '10px 16px 22px rgba(0, 0, 0, 0.55)',
+      'inset 0 1px 0 rgba(255, 255, 255, 0.45)',
+      'inset 0 -4px 8px rgba(0, 0, 0, 0.3)',
+    ].join(', '),
+  }
+  const shellClass =
+    'relative z-10 block w-full overflow-hidden rounded-lg text-left transition-transform duration-300 ease-out [transform-style:preserve-3d] [transform:rotateX(3deg)_rotateY(-9deg)] group-hover:[transform:rotateX(0deg)_rotateY(-3deg)_translateY(-5px)] group-focus-within:[transform:rotateX(0deg)_rotateY(-3deg)_translateY(-5px)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#4ce0e6]'
+
+  const body = (
+    <>
+      {/* 背表紙 */}
+      <span aria-hidden className="absolute inset-y-0 left-0 w-3" style={{ background: `linear-gradient(90deg, ${darken(color, 0.5)}, ${darken(color, 0.18)} 60%, ${lighten(color, 0.12)})` }} />
+      <div className="py-2 pl-4 pr-2">
+        {/* デッキ名のラベル */}
+        <div className="mb-1.5 truncate rounded px-2 py-1 text-xs font-bold text-white" style={{ background: 'rgba(0, 0, 0, 0.38)' }}>
+          {name}
+        </div>
+        {/* 窓（写真。無ければ、推しホロメン） */}
+        <div className="relative overflow-hidden rounded" style={{ aspectRatio: PHOTO_ASPECT, border: `2px solid ${darken(color, 0.5)}`, boxShadow: 'inset 0 2px 8px rgba(0, 0, 0, 0.6)', background: '#071820' }}>
+          {img ? <img src={img} alt="" loading="lazy" className={`h-full w-full object-cover ${photo ? 'object-center' : 'object-top'}`} /> : <div className="flex h-full items-center justify-center px-1 text-center text-[10px] text-[#9fc3ca]">推しホロメン未設定</div>}
+          {/* ビニールの照り返し */}
+          <span aria-hidden className="pointer-events-none absolute inset-0" style={{ background: 'linear-gradient(115deg, rgba(255,255,255,0.34) 0%, rgba(255,255,255,0) 34%, rgba(255,255,255,0) 62%, rgba(255,255,255,0.12) 100%)' }} />
+          <span className="absolute bottom-1 right-1 rounded px-1.5 py-0.5 text-[10px] font-bold" style={{ background: complete ? '#3ddc97' : '#ffd76a', color: '#04232a' }}>
+            {complete ? '完成' : '作成中'}
           </span>
         </div>
-        <div className="hud-mono text-[10px] text-[#9fc3ca]">{formatDate(deck.updated_at)}</div>
+        {/* 枚数と、更新日時 */}
+        <div className="mt-1.5 rounded px-2 py-1" style={{ background: 'rgba(0, 0, 0, 0.4)' }}>
+          <div className="hud-mono flex flex-wrap gap-x-2 text-[10px]">
+            <span style={{ color: countColor(mainTotal, MAIN_TARGET) }}>
+              メイン {mainTotal}/{MAIN_TARGET}
+            </span>
+            <span style={{ color: countColor(yellTotal, YELL_TARGET) }}>
+              エール {yellTotal}/{YELL_TARGET}
+            </span>
+          </div>
+          {updatedAt && <div className="hud-mono text-[10px] text-[#d7eef2]/80">{formatDate(updatedAt)}</div>}
+        </div>
       </div>
-    </button>
+    </>
+  )
+
+  return (
+    <div className="group relative [perspective:800px] hover:z-30 focus-within:z-30">
+      {/* 代表カード：ケースの裏に隠れていて、カーソルを乗せると、上にせり上がる */}
+      {fan.length > 0 && (
+        <div aria-hidden className="pointer-events-none absolute inset-x-2 top-1 z-0 flex justify-center transition-transform duration-300 ease-out group-hover:-translate-y-[62%] group-focus-within:-translate-y-[62%]">
+          {fan.map((c, i) => (
+            <img
+              key={c.id}
+              src={c.image_url ?? ''}
+              alt=""
+              loading="lazy"
+              className="w-[42%] rounded shadow-[0_6px_14px_rgba(0,0,0,0.6)]"
+              style={{ marginLeft: i === 0 ? 0 : '-7%', transform: `rotate(${(i - (fan.length - 1) / 2) * 10}deg)`, transformOrigin: 'bottom center' }}
+            />
+          ))}
+        </div>
+      )}
+      {onOpen ? (
+        <button type="button" onClick={onOpen} title={`${name}（クリックで詳細）`} className={shellClass} style={shellStyle}>
+          {body}
+        </button>
+      ) : (
+        <div className={shellClass} style={shellStyle}>
+          {body}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -250,12 +377,14 @@ function DeckDetail({ deck, onEdit, onDelete, onClose, onZoom }: { deck: DeckCas
 }
 
 // ---- 編集（カード検索・枚数の調整・デッキログの読み込み） ----
-function DeckEditor({ id, initial, focusImport, limitText, canSaveNew, onSave, onCancel, onZoom }: { id: number | null; initial: DeckRecipe; focusImport: boolean; limitText: string; canSaveNew: boolean; onSave: (recipe: DeckRecipe) => Promise<void>; onCancel: () => void; onZoom: (card: DeckCard) => void }) {
+function DeckEditor({ id, initial, focusImport, limitText, canSaveNew, onSave, onCancel, onZoom }: { id: number | null; initial: DeckRecipeX; focusImport: boolean; limitText: string; canSaveNew: boolean; onSave: (recipe: DeckRecipeX) => Promise<void>; onCancel: () => void; onZoom: (card: DeckCard) => void }) {
   const { sets } = useSetsAdmin()
-  const [recipe, setRecipe] = useState<DeckRecipe>(initial)
+  const [recipe, setRecipe] = useState<DeckRecipeX>(initial)
   const [initialJson] = useState(() => JSON.stringify(initial))
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
+  const [lookMessage, setLookMessage] = useState('')
+  const [showcaseNote, setShowcaseNote] = useState('')
 
   // デッキログ
   const [code, setCode] = useState('')
@@ -314,6 +443,42 @@ function DeckEditor({ id, initial, focusImport, limitText, canSaveNew, onSave, o
     return m
   }, [recipe])
 
+  // 代表カード：デッキに入っているカードの中から、3枚まで選ぶ（デッキから抜いたカードは、選択も外れる）
+  const showcaseIds = useMemo(() => (recipe.showcase ?? []).filter((x) => countInDeck.has(x)), [recipe.showcase, countInDeck])
+  const showcaseSlots = useMemo(() => {
+    const all = new Map<number, DeckCard>()
+    if (recipe.oshi) all.set(recipe.oshi.id, recipe.oshi)
+    recipe.yells.forEach((e) => all.set(e.card.id, e.card))
+    recipe.main.forEach((e) => all.set(e.card.id, e.card))
+    return showcaseIds.map((x) => all.get(x)).filter((c): c is DeckCard => !!c)
+  }, [recipe, showcaseIds])
+
+  const toggleShowcase = (cardId: number) => {
+    if (showcaseIds.includes(cardId)) {
+      setRecipe({ ...recipe, showcase: showcaseIds.filter((x) => x !== cardId) })
+      setShowcaseNote('')
+      return
+    }
+    if (showcaseIds.length >= SHOWCASE_MAX) {
+      setShowcaseNote(`代表カードは、${SHOWCASE_MAX}枚までです。先に、どれかを外してください`)
+      return
+    }
+    setRecipe({ ...recipe, showcase: [...showcaseIds, cardId] })
+    setShowcaseNote('')
+  }
+
+  const handlePhoto = async (file: File | undefined) => {
+    if (!file) return
+    setLookMessage('写真を処理中...')
+    try {
+      const casePhoto = await fileToCoverDataUrl(file)
+      setRecipe((prev) => ({ ...prev, casePhoto }))
+      setLookMessage('')
+    } catch (err) {
+      setLookMessage(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   // カードの種類に合わせて、入れる場所を決める（推しホロメン→推し枠、エール→エール、それ以外→メインデッキ）
   const addCard = (card: DeckCard) => {
     const t = card.card_type ?? ''
@@ -338,7 +503,7 @@ function DeckEditor({ id, initial, focusImport, limitText, canSaveNew, onSave, o
     try {
       const deck = await fetchDecklog(c)
       const r = await resolveDecklog(deck)
-      setRecipe(r.recipe)
+      setRecipe({ ...r.recipe, ...(recipe.caseColor ? { caseColor: recipe.caseColor } : {}), ...(recipe.casePhoto ? { casePhoto: recipe.casePhoto } : {}) })
       const base = `読み込みました：推し ${r.recipe.oshi ? 1 : 0}枚／エール ${total(r.recipe.yells)}枚／メイン ${total(r.recipe.main)}枚（${r.matched}/${r.requested}枚）`
       setImportMessage({ ok: r.missing.length === 0, text: r.missing.length === 0 ? base : `${base}。カードデータに見つからなかったカード：${r.missing.join('、')}（必要なら、左の検索で入れてください）` })
     } catch (err) {
@@ -353,7 +518,7 @@ function DeckEditor({ id, initial, focusImport, limitText, canSaveNew, onSave, o
     setSaving(true)
     setMessage('保存中...')
     try {
-      await onSave({ ...recipe, name })
+      await onSave({ ...recipe, name, showcase: showcaseIds })
     } catch (err) {
       setMessage('保存に失敗しました: ' + (err instanceof Error ? err.message : String(err)))
       setSaving(false)
@@ -470,7 +635,7 @@ function DeckEditor({ id, initial, focusImport, limitText, canSaveNew, onSave, o
               type="button"
               className="btn-secondary ml-auto"
               onClick={() => {
-                if (window.confirm('今のデッキの内容をすべて消して、空にしますか？（保存するまで、保存済みのデッキは変わりません）')) setRecipe({ ...EMPTY_RECIPE, name: recipe.name })
+                if (window.confirm('今のデッキの内容をすべて消して、空にしますか？（保存するまで、保存済みのデッキは変わりません）')) setRecipe({ ...EMPTY_RECIPE, name: recipe.name, ...(recipe.caseColor ? { caseColor: recipe.caseColor } : {}), ...(recipe.casePhoto ? { casePhoto: recipe.casePhoto } : {}) })
               }}
             >
               空にする
@@ -482,6 +647,83 @@ function DeckEditor({ id, initial, focusImport, limitText, canSaveNew, onSave, o
             <input className="field w-full" value={recipe.name} maxLength={40} onChange={(e) => setRecipe({ ...recipe, name: e.target.value })} />
           </label>
 
+          {/* ケースの見た目と、代表カード */}
+          <div className="mb-3 flex flex-wrap gap-4 rounded-lg border border-[#2a4a52] bg-[#071820]/60 p-3">
+            <div className="w-[136px] shrink-0 pt-16" title="カーソルを乗せると、代表カードが上に出ます">
+              <CaseArt recipe={{ ...recipe, showcase: showcaseIds }} name={recipe.name || '新しいデッキ'} />
+            </div>
+            <div className="min-w-0 flex-1 basis-56">
+              <div className="mb-1 text-xs font-bold text-[#d7eef2]">ケースの色</div>
+              <div className="mb-3 flex flex-wrap items-center gap-1.5">
+                {CASE_COLORS.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setRecipe({ ...recipe, caseColor: c })}
+                    aria-label={`ケースの色 ${c}`}
+                    aria-pressed={(recipe.caseColor ?? DEFAULT_CASE_COLOR) === c}
+                    className="h-7 w-7 rounded-full border-2"
+                    style={{ background: c, borderColor: (recipe.caseColor ?? DEFAULT_CASE_COLOR) === c ? '#ffffff' : 'rgba(255,255,255,0.25)' }}
+                  />
+                ))}
+                <label className="ml-1 flex items-center gap-1 text-[10px] text-[#9fc3ca]">
+                  自由に選ぶ
+                  <input type="color" value={recipe.caseColor ?? DEFAULT_CASE_COLOR} onChange={(e) => setRecipe({ ...recipe, caseColor: e.target.value })} aria-label="ケースの色を自由に選ぶ" className="h-7 w-9 cursor-pointer rounded border border-[#2a4a52] bg-transparent p-0" />
+                </label>
+              </div>
+
+              <div className="mb-1 text-xs font-bold text-[#d7eef2]">ケースの写真</div>
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <label className="btn-secondary cursor-pointer">
+                  写真を選ぶ
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="sr-only"
+                    onChange={(e) => {
+                      void handlePhoto(e.target.files?.[0])
+                      e.target.value = ''
+                    }}
+                  />
+                </label>
+                {recipe.casePhoto && (
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => setRecipe({ ...recipe, casePhoto: undefined })}
+                  >
+                    写真を外す
+                  </button>
+                )}
+                <span className="text-[10px] text-[#9fc3ca]">{recipe.casePhoto ? '窓の形に切り抜いて、保存します' : '未設定のときは、推しホロメンの画像が入ります'}</span>
+              </div>
+              {lookMessage && <p className="mb-2 text-xs text-[#ffd76a]">{lookMessage}</p>}
+
+              <div className="mb-1 text-xs font-bold text-[#d7eef2]">
+                代表カード（{showcaseSlots.length} / {SHOWCASE_MAX}枚）
+              </div>
+              <div className="flex gap-2">
+                {Array.from({ length: SHOWCASE_MAX }, (_, i) => {
+                  const c = showcaseSlots[i]
+                  return c ? (
+                    <div key={c.id} className="relative">
+                      <Thumb card={c} width={48} onZoom={onZoom} />
+                      <button type="button" onClick={() => toggleShowcase(c.id)} aria-label={`${c.card_name}を代表カードから外す`} className="absolute -right-1.5 -top-1.5 h-5 w-5 rounded-full border border-[#2a4a52] bg-[#0a0f1e] text-[11px] leading-none text-white hover:border-[#ff8a8a]">
+                        ×
+                      </button>
+                    </div>
+                  ) : (
+                    <div key={`empty-${i}`} style={{ width: 48, height: Math.round(48 * (88 / 63)) }} className="flex items-center justify-center rounded border border-dashed border-[#2a4a52] text-[10px] text-[#6f9aa3]">
+                      空き
+                    </div>
+                  )
+                })}
+              </div>
+              <p className="mt-1 text-[10px] text-[#9fc3ca]">下の一覧の「☆」で選びます。ケースにカーソルを乗せると、上に出ます（選ばないと、推し・メインの先頭が出ます）</p>
+              {showcaseNote && <p className="mt-1 text-xs text-[#ffd76a]">{showcaseNote}</p>}
+            </div>
+          </div>
+
           <div className="mb-3">
             <div className="mb-1 text-xs" style={{ color: recipe.oshi ? '#3ddc97' : '#ffd76a' }}>
               推しホロメン {recipe.oshi ? 1 : 0} / 1枚
@@ -490,6 +732,7 @@ function DeckEditor({ id, initial, focusImport, limitText, canSaveNew, onSave, o
               <div className="flex items-center gap-3">
                 <Thumb card={recipe.oshi} width={44} onZoom={onZoom} />
                 <div className="min-w-0 flex-1 break-all text-sm text-white">{recipe.oshi.card_name}</div>
+                <StarButton on={showcaseIds.includes(recipe.oshi.id)} onClick={() => recipe.oshi && toggleShowcase(recipe.oshi.id)} />
                 <button type="button" className="btn-secondary shrink-0" onClick={() => setRecipe({ ...recipe, oshi: null })}>
                   外す
                 </button>
@@ -509,6 +752,7 @@ function DeckEditor({ id, initial, focusImport, limitText, canSaveNew, onSave, o
                 <li key={e.card.id} className="flex items-center gap-3">
                   <Thumb card={e.card} width={36} onZoom={onZoom} />
                   <div className="min-w-0 flex-1 break-all text-sm text-white">{e.card.card_name}</div>
+                  <StarButton on={showcaseIds.includes(e.card.id)} onClick={() => toggleShowcase(e.card.id)} />
                   <CountStepper count={e.count} onChange={(d) => setRecipe({ ...recipe, yells: changeCount(recipe.yells, e.card.id, d) })} />
                 </li>
               ))}
@@ -532,6 +776,7 @@ function DeckEditor({ id, initial, focusImport, limitText, canSaveNew, onSave, o
                       {e.card.card_type ? ` / ${e.card.card_type}` : ''}
                     </div>
                   </div>
+                  <StarButton on={showcaseIds.includes(e.card.id)} onClick={() => toggleShowcase(e.card.id)} />
                   <CountStepper count={e.count} onChange={(d) => setRecipe({ ...recipe, main: changeCount(recipe.main, e.card.id, d) })} />
                 </li>
               ))}
@@ -547,7 +792,7 @@ function DeckEditor({ id, initial, focusImport, limitText, canSaveNew, onSave, o
 export function DeckCasePanel({ info }: { info: RoleInfo }) {
   const cases = useDeckCases(info.deckLimit)
   const [viewId, setViewId] = useState<number | null>(null) // 詳細を開いているデッキ
-  const [editing, setEditing] = useState<{ id: number | null; recipe: DeckRecipe; focusImport: boolean } | null>(null) // 編集中（id が null のときは、新しいデッキ）
+  const [editing, setEditing] = useState<{ id: number | null; recipe: DeckRecipeX; focusImport: boolean } | null>(null) // 編集中（id が null のときは、新しいデッキ）
   const [zoom, setZoom] = useState<DeckCard | null>(null)
   const [notice, setNotice] = useState('')
 
@@ -567,7 +812,7 @@ export function DeckCasePanel({ info }: { info: RoleInfo }) {
 
   const startEdit = (deck: DeckCase) => setEditing({ id: deck.id, recipe: normalizeRecipe(deck.recipe), focusImport: false })
 
-  const handleSave = async (recipe: DeckRecipe) => {
+  const handleSave = async (recipe: DeckRecipeX) => {
     if (editing?.id == null) {
       const id = await cases.saveAs(recipe)
       setViewId(id)
@@ -616,17 +861,22 @@ export function DeckCasePanel({ info }: { info: RoleInfo }) {
       {!cases.error && !cases.loading && cases.decks.length === 0 && <p className="text-xs text-[#9fc3ca]">まだデッキがありません。「新規作成」か「デッキログから」で、最初のデッキを作りましょう</p>}
       {cases.loading && cases.decks.length === 0 && <p className="text-xs text-[#9fc3ca]">読み込み中...</p>}
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
-        {cases.decks.map((d) => (
-          <DeckCaseTile
-            key={d.id}
-            deck={d}
-            onOpen={() => {
-              setNotice('')
-              setViewId(d.id)
-            }}
-          />
-        ))}
+      {/* デッキの窓：デッキが増えたら、この中をスクロールする（上の余白は、代表カードが出るためのもの） */}
+      <div tabIndex={0} aria-label="デッキの一覧（スクロールできます）" className="max-h-[60vh] overflow-y-auto overflow-x-hidden overscroll-contain px-2 pb-4 pt-24 lg:max-h-[78vh]">
+        <div className="grid grid-cols-2 gap-x-4 gap-y-16 sm:grid-cols-3 xl:grid-cols-4">
+          {cases.decks.map((d) => (
+            <CaseArt
+              key={d.id}
+              recipe={d.recipe}
+              name={d.name}
+              updatedAt={d.updated_at}
+              onOpen={() => {
+                setNotice('')
+                setViewId(d.id)
+              }}
+            />
+          ))}
+        </div>
       </div>
 
       {editing && (
