@@ -54,6 +54,7 @@ interface Env {
     if (!/^[0-9A-Za-z]{3,12}$/.test(code)) return jsonError('デッキコードの形式が正しくありません', 400)
   
     let lastStatus = 0
+    const trail: string[] = [] // 原因調べ用：どのサイトが、何を返したか
     for (const site of SITES) {
       let res: Response
       try {
@@ -63,8 +64,14 @@ interface Env {
           headers: {
             'Content-Type': 'application/json;charset=UTF-8',
             Accept: 'application/json, text/plain, */*',
+            'Accept-Language': 'ja,en;q=0.8',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
             Origin: site,
             Referer: `${site}/view/${code}`,
+            'Sec-Fetch-Site': 'same-origin',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Dest': 'empty',
+            'X-Requested-With': 'XMLHttpRequest',
           },
           body: '{}',
         })
@@ -72,8 +79,9 @@ interface Env {
         continue
       }
       lastStatus = res.status
-      if (!res.ok) continue
       const text = await res.text()
+      trail.push(`${site.replace('https://', '')}: HTTP ${res.status} ${text.slice(0, 80).replace(/\s+/g, ' ')}`)
+      if (!res.ok) continue
       // 見つからないときは、JSONではない・中身が空のことがある。デッキの形（JSONのオブジェクト）のときだけ、返す
       try {
         const parsed: unknown = JSON.parse(text)
@@ -84,5 +92,5 @@ interface Env {
         // 次のサイトを試す
       }
     }
-    return jsonError(lastStatus === 404 || lastStatus === 0 ? 'このデッキコードのデッキが見つかりませんでした（コードの間違い・非公開のデッキの可能性があります）' : `デッキログから取得できませんでした（HTTP ${lastStatus}）`, 502)
+    return jsonError(lastStatus === 404 || lastStatus === 0 ? 'このデッキコードのデッキが見つかりませんでした（コードの間違い・非公開のデッキの可能性があります）' : `デッキログから取得できませんでした（HTTP ${lastStatus}）[${trail.join(' / ')}]`, 502)
   }
