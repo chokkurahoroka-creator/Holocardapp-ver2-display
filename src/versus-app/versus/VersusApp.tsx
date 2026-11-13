@@ -4,6 +4,7 @@ import { PlayfieldPanel } from '../components/PlayfieldPanel'
 import { useVersusRoom, VERSUS_NAME_KEY } from '../hooks/useVersusRoom'
 import { useRoleInfo } from '../hooks/useRoleInfo'
 import { VersusLogin } from './VersusLogin'
+import { DeckCasePanel } from '../components/DeckCasePanel'
 import { buildRoomLink } from './roomLink'
 import type { VersusSync } from './wire'
 
@@ -88,65 +89,75 @@ export default function VersusApp() {
   }
 
   const canStart = name.trim().length > 0 && !busy
+  // ログインして、アカウントの種類（権限）がある人には、ルームの右側に「デッキ」を出す（スマホなど、狭い画面では、ルームの下）
+  const showDecks = !roleLoading && signedIn && !!roleInfo.role
   return (
     <div className="min-h-screen px-4 py-8 flex justify-center">
-      <div className="w-full max-w-md flex flex-col gap-4">
+      <div className={`w-full flex flex-col gap-4 ${showDecks ? 'max-w-6xl' : 'max-w-md'}`}>
         <header>
           <h1 className="hud-font text-white text-xl font-bold">対戦ルーム</h1>
           <p className="text-xs text-[#9fc3ca] mt-1">ルームを作って、友達に招待URL（またはコード）を送ると、同じ盤面でリアルタイムに対戦できます。</p>
         </header>
 
-        {!roleLoading && <VersusLogin info={roleInfo} signedIn={signedIn} email={email} />}
+        <div className={showDecks ? 'grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] lg:items-start' : ''}>
+          {/* 左：対戦ルーム（縦に並べる） */}
+          <div className="flex min-w-0 flex-col gap-4">
+            {!roleLoading && <VersusLogin info={roleInfo} signedIn={signedIn} email={email} />}
 
-        <section className="hud-panel p-4 flex flex-col gap-3">
-          <label className="text-xs text-[#9fc3ca]" htmlFor="versus-name">
-            あなたの名前
-          </label>
-          <input id="versus-name" className="field w-full" value={name} maxLength={20} placeholder="例：うる" onChange={(e) => saveName(e.target.value)} />
-        </section>
+            <section className="hud-panel p-4 flex flex-col gap-3">
+              <label className="text-xs text-[#9fc3ca]" htmlFor="versus-name">
+                あなたの名前
+              </label>
+              <input id="versus-name" className="field w-full" value={name} maxLength={20} placeholder="例：うる" onChange={(e) => saveName(e.target.value)} />
+            </section>
 
-        <section className="hud-panel p-4 flex flex-col gap-2">
-          <h2 className="hud-font text-white text-sm font-bold">ルームを作る</h2>
-          {roleLoading || roleInfo.canCreateRoom ? (
-            <>
-              <p className="text-[11px] text-[#9fc3ca]">作ったあと、使うデッキを選んで、自分の側に置きます。</p>
-              <button type="button" className="btn-primary" disabled={!canStart || roleLoading} onClick={() => void v.create(name.trim())}>
-                {busy ? '準備中…' : 'ルームを作る'}
+            <section className="hud-panel p-4 flex flex-col gap-2">
+              <h2 className="hud-font text-white text-sm font-bold">ルームを作る</h2>
+              {roleLoading || roleInfo.canCreateRoom ? (
+                <>
+                  <p className="text-[11px] text-[#9fc3ca]">作ったあと、使うデッキを選んで、自分の側に置きます。</p>
+                  <button type="button" className="btn-primary" disabled={!canStart || roleLoading} onClick={() => void v.create(name.trim())}>
+                    {busy ? '準備中…' : 'ルームを作る'}
+                  </button>
+                </>
+              ) : (
+                <p className="text-[11px] text-[#ffcf8a]" role="note">
+                  {roleInfo.role === 'temp'
+                    ? '臨時アカウントでは、ルームを作れません。ルームのコードやリンクを、もらって、下から入室してください。'
+                    : roleInfo.expired
+                      ? 'アカウントの有効期限が切れています。'
+                      : signedIn
+                        ? 'このアカウントでは、ルームを作れません（メンバー以上のアカウントが必要です）。ルームのコードやリンクを、もらって、下から入室できます。'
+                        : 'ルームを作るには、上の「アカウントでログイン」から、メンバー以上のアカウントでログインしてください（コードで入室するだけなら、ログインは、いりません）。'}
+                </p>
+              )}
+            </section>
+
+            <section className="hud-panel p-4 flex flex-col gap-2">
+              <h2 className="hud-font text-white text-sm font-bold">コードで入る</h2>
+              <input
+                className="field w-full hud-mono tracking-[0.3em] text-center uppercase"
+                value={code}
+                maxLength={6}
+                placeholder="ABC123"
+                aria-label="ルームのコード"
+                onChange={(e) => setCode(e.target.value.toUpperCase())}
+              />
+              <button type="button" className="btn-secondary" disabled={!canStart || code.trim().length < 6} onClick={() => void v.join(code.trim(), name.trim())}>
+                入室する
               </button>
-            </>
-          ) : (
-            <p className="text-[11px] text-[#ffcf8a]" role="note">
-              {roleInfo.role === 'temp'
-                ? '臨時アカウントでは、ルームを作れません。ルームのコードやリンクを、もらって、下から入室してください。'
-                : roleInfo.expired
-                  ? 'アカウントの有効期限が切れています。'
-                  : signedIn
-                    ? 'このアカウントでは、ルームを作れません（メンバー以上のアカウントが必要です）。ルームのコードやリンクを、もらって、下から入室できます。'
-                    : 'ルームを作るには、上の「アカウントでログイン」から、メンバー以上のアカウントでログインしてください（コードで入室するだけなら、ログインは、いりません）。'}
-            </p>
-          )}
-        </section>
+            </section>
 
-        <section className="hud-panel p-4 flex flex-col gap-2">
-          <h2 className="hud-font text-white text-sm font-bold">コードで入る</h2>
-          <input
-            className="field w-full hud-mono tracking-[0.3em] text-center uppercase"
-            value={code}
-            maxLength={6}
-            placeholder="ABC123"
-            aria-label="ルームのコード"
-            onChange={(e) => setCode(e.target.value.toUpperCase())}
-          />
-          <button type="button" className="btn-secondary" disabled={!canStart || code.trim().length < 6} onClick={() => void v.join(code.trim(), name.trim())}>
-            入室する
-          </button>
-        </section>
+            {error && (
+              <p role="alert" className="rounded-lg border border-[#ff8a8a]/60 bg-[#2a0d0d]/80 px-3 py-2 text-xs text-[#ffd0d0]">
+                {error}
+              </p>
+            )}
+          </div>
 
-        {error && (
-          <p role="alert" className="rounded-lg border border-[#ff8a8a]/60 bg-[#2a0d0d]/80 px-3 py-2 text-xs text-[#ffd0d0]">
-            {error}
-          </p>
-        )}
+          {/* 右：デッキ（デッキケースのギャラリー）。狭い画面では、左の下に並ぶ */}
+          {showDecks && <DeckCasePanel info={roleInfo} />}
+        </div>
       </div>
     </div>
   )
