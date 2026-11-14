@@ -1,8 +1,19 @@
 {
-    "name": "holocardapp-ver2",
-    "compatibility_date": "2026-09-14",
-    "assets": {
+  "name": "holocardapp-ver2",
+  // Worker：「/api/decklog」を処理する（静的ファイルの配信は、これまでどおり）
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-09-14",
+  "assets": {
     "directory": "./dist",
-    "not_found_handling": "single-page-application"
+    // Worker から、静的ファイルを返すときに使う
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    // 「/api/」で始まるアクセスだけ、先に Worker を通す（それ以外は、Worker を通さず、静的ファイルをそのまま配信）
+    "run_worker_first": ["/api/*"]
+  },
+  // 公開しても問題のない値です（サイトに、すでに、含まれているもの）。.env の VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY と、同じ値を入れてください
+  "vars": {
+    "SUPABASE_URL": "ここに VITE_SUPABASE_URL と同じ値",
+    "SUPABASE_ANON_KEY": "ここに VITE_SUPABASE_ANON_KEY と同じ値"
   }
-  }
+}
