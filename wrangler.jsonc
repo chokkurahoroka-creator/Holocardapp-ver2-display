@@ -13,7 +13,7 @@
   },
   // 公開しても問題のない値です（サイトに、すでに、含まれているもの）。.env の VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY と、同じ値を入れてください
   "vars": {
-    "SUPABASE_URL": "ここに VITE_SUPABASE_URL と同じ値",
-    "SUPABASE_ANON_KEY": "ここに VITE_SUPABASE_ANON_KEY と同じ値"
+    "SUPABASE_URL": "https://pgazbkpavsfmtfaaoglw.supabase.co",
+    "SUPABASE_ANON_KEY": "sb_publishable_nkceGPB8GT7N5MYImwjaUA_Y--x0VJm"
   }
 }
