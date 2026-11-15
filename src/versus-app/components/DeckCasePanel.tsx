@@ -143,7 +143,6 @@ function countColor(n: number, target: number): string {
 const DEFAULT_CASE_COLOR = '#2a8aa0'
 const CASE_COLORS = ['#2a8aa0', '#243b6b', '#7b4fc9', '#e86fa6', '#c0392b', '#e6882e', '#d4b02a', '#2e9d6a', '#2b2f36', '#e8edf2']
 const MAX_CASE_COLORS = 3
-const CASE_DEPTH = 10 // ケースの厚み（右と上に見える面の幅・高さ。px）
 const SHOWCASE_MAX = 3
 const PHOTO_ASPECT = '63 / 76' // ケースの窓の縦横比（写真は、この形に切り抜く）
 
@@ -246,8 +245,23 @@ function yellChips(r: DeckRecipeX): { color: string; count: number }[] {
   return YELL_COLORS.filter((c) => counts.has(c)).map((c) => ({ color: c, count: counts.get(c) ?? 0 }))
 }
 
+// 代表カードの扇の配置（カードの数ごと）。幅は、ケースと同じ範囲に収まる（左端・右端のケースでも、はみ出さない）。
+// open：カーソルを乗せたときの、位置と回転（左から順に、少しずつ遅れて開く）
+const FAN_LAYOUT: Record<1 | 2 | 3, { left: string; open: string }[]> = {
+  1: [{ left: 'left-[15%]', open: 'group-hover:[transform:translateY(0)_rotate(0deg)] group-focus-within:[transform:translateY(0)_rotate(0deg)]' }],
+  2: [
+    { left: 'left-[7%]', open: 'group-hover:[transform:translateY(0)_rotate(-7deg)] group-focus-within:[transform:translateY(0)_rotate(-7deg)]' },
+    { left: 'left-[23%]', open: 'group-hover:[transform:translateY(-3%)_rotate(7deg)] group-focus-within:[transform:translateY(-3%)_rotate(7deg)] group-hover:delay-100 group-focus-within:delay-100' },
+  ],
+  3: [
+    { left: 'left-0', open: 'group-hover:[transform:translateY(0)_rotate(-9deg)] group-focus-within:[transform:translateY(0)_rotate(-9deg)]' },
+    { left: 'left-[15%]', open: 'group-hover:[transform:translateY(-5%)_rotate(0deg)] group-focus-within:[transform:translateY(-5%)_rotate(0deg)] group-hover:delay-75 group-focus-within:delay-75' },
+    { left: 'left-[30%]', open: 'group-hover:[transform:translateY(0)_rotate(9deg)] group-focus-within:[transform:translateY(0)_rotate(9deg)] group-hover:delay-150 group-focus-within:delay-150' },
+  ],
+}
+
 // 直線だけで作った立体のデッキケース1個（正面＋上の面＋右の面の、箱の形）。
-// カーソルを乗せる（キーボードで選ぶ）と、少し持ち上がって、代表カードが上にせり上がる（乗せる前は、見えない）。
+// カーソルを乗せる（キーボードで選ぶ）と、少し持ち上がって、代表カードが、手前に、扇のように広がって出る（乗せる前は、見えない）。
 // onOpen が無いときは、クリックできない見本（編集画面のプレビュー・並び替え中）になる。overlay は、その上に重ねる部品
 function CaseArt({ recipe, name, updatedAt, onOpen, overlay }: { recipe: DeckRecipeX; name: string; updatedAt?: string; onOpen?: () => void; overlay?: React.ReactNode }) {
   const colors = caseColorsOf(recipe)
@@ -260,7 +274,6 @@ function CaseArt({ recipe, name, updatedAt, onOpen, overlay }: { recipe: DeckRec
   const img = photo || recipe.oshi?.image_url || ''
   const fan = showcaseCards(recipe)
   const chips = yellChips(recipe)
-  const D = CASE_DEPTH
 
   const faceStyle: React.CSSProperties = {
     background: caseFaceBackground(colors, recipe.caseStyle ?? 'gradient'),
@@ -307,28 +320,13 @@ function CaseArt({ recipe, name, updatedAt, onOpen, overlay }: { recipe: DeckRec
     </>
   )
 
+  const layout = FAN_LAYOUT[Math.min(Math.max(fan.length, 1), 3) as 1 | 2 | 3]
   return (
-    <div className="group relative hover:z-30 focus-within:z-30" style={{ marginTop: D, marginRight: D }}>
-      {/* 代表カード：ケースの裏に隠れていて（見えない）、カーソルを乗せると、上にせり上がる */}
-      {fan.length > 0 && (
-        <div aria-hidden className="pointer-events-none absolute left-[-15%] top-1 z-0 flex w-[130%] justify-center opacity-0 transition-[transform,opacity] duration-300 ease-out group-hover:-translate-y-[85%] group-hover:opacity-100 group-focus-within:-translate-y-[85%] group-focus-within:opacity-100 sm:left-[-25%] sm:w-[150%]">
-          {fan.map((c, i) => (
-            <img
-              key={c.id}
-              src={c.image_url ?? ''}
-              alt=""
-              loading="lazy"
-              className="w-[36%] shadow-[0_6px_14px_rgba(0,0,0,0.65)]"
-              style={{ marginLeft: i === 0 ? 0 : '-6%', transform: `rotate(${(i - (fan.length - 1) / 2) * 8}deg)`, transformOrigin: 'bottom center' }}
-            />
-          ))}
-        </div>
-      )}
-
+    <div className="group relative [--d:7px] hover:z-30 focus-within:z-30 sm:[--d:10px]" style={{ marginTop: 'var(--d)', marginRight: 'var(--d)' }}>
       {/* 箱の本体：カーソルを乗せると、少し持ち上がる */}
       <div className="relative transition-transform duration-200 ease-out group-hover:-translate-y-1 group-focus-within:-translate-y-1">
         {/* 落ち影 */}
-        <span aria-hidden className="absolute inset-0 z-0" style={{ transform: `translate(${D + 4}px, ${D + 6}px)`, background: 'rgba(0, 0, 0, 0.5)', filter: 'blur(7px)' }} />
+        <span aria-hidden className="absolute inset-0 z-0" style={{ transform: 'translate(calc(var(--d) + 4px), calc(var(--d) + 6px))', background: 'rgba(0, 0, 0, 0.5)', filter: 'blur(7px)' }} />
         {onOpen ? (
           <button type="button" onClick={onOpen} title={`${name}（クリックで詳細）`} className={faceClass} style={faceStyle}>
             {body}
@@ -339,10 +337,29 @@ function CaseArt({ recipe, name, updatedAt, onOpen, overlay }: { recipe: DeckRec
           </div>
         )}
         {/* 上の面（右へ、ななめに伸ばした、平行四辺形） */}
-        <span aria-hidden className="absolute bottom-full left-0 z-10 w-full" style={{ height: D, background: lighten(c1, 0.38), boxShadow: 'inset 0 0 0 1px rgba(0, 0, 0, 0.35)', transformOrigin: 'bottom left', transform: 'skewX(-45deg)' }} />
+        <span aria-hidden className="absolute bottom-full left-0 z-10 w-full" style={{ height: 'var(--d)', background: lighten(c1, 0.38), boxShadow: 'inset 0 0 0 1px rgba(0, 0, 0, 0.35)', transformOrigin: 'bottom left', transform: 'skewX(-45deg)' }} />
         {/* 右の面 */}
-        <span aria-hidden className="absolute left-full top-0 z-10 h-full" style={{ width: D, background: darken(cLast, 0.5), boxShadow: 'inset 0 0 0 1px rgba(0, 0, 0, 0.4)', transformOrigin: 'top left', transform: 'skewY(-45deg)' }} />
+        <span aria-hidden className="absolute left-full top-0 z-10 h-full" style={{ width: 'var(--d)', background: darken(cLast, 0.5), boxShadow: 'inset 0 0 0 1px rgba(0, 0, 0, 0.4)', transformOrigin: 'top left', transform: 'skewY(-45deg)' }} />
       </div>
+
+      {/* 代表カード：ケースの手前に、扇のように広がって出る（乗せる前は、透明で、ケースの中央に重なっている）。
+          不透明度は、少しずつ上がり、カードは、順番に（左→中央→右）、回転しながら、開く */}
+      {fan.length > 0 && (
+        <div aria-hidden className="pointer-events-none absolute bottom-[60%] left-0 z-20 h-0 w-full">
+          {fan.map((c, i) => {
+            const l = layout[i]
+            return (
+              <img
+                key={c.id}
+                src={c.image_url ?? ''}
+                alt=""
+                loading="lazy"
+                className={`absolute bottom-0 aspect-[63/88] w-[70%] object-cover opacity-0 shadow-[0_8px_18px_rgba(0,0,0,0.7)] [transform-origin:50%_100%] [transform:translateY(45%)_rotate(0deg)_scale(0.8)] [transition:opacity_700ms_ease-out,transform_550ms_cubic-bezier(0.2,0.9,0.3,1.15)] group-hover:opacity-100 group-focus-within:opacity-100 ${l?.left ?? ''} ${l?.open ?? ''}`}
+              />
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -1014,9 +1031,9 @@ export function DeckCasePanel({ info }: { info: RoleInfo }) {
 
       {reordering && <p className="mb-2 text-xs text-[#ffd76a]">並び替え中：◀ ▶ で、1つずつ動かせます（パソコンでは、ドラッグでも動かせます）。終わったら「並び替えを完了」を押してください</p>}
 
-      {/* デッキの窓：デッキが増えたら、この中をスクロールする（上の余白は、代表カードが上に出るためのもの）。並びは、登録順（手動で並び替えたときは、その順） */}
-      <div tabIndex={0} aria-label="デッキの一覧（スクロールできます）" className="max-h-[60vh] overflow-y-auto overflow-x-hidden overscroll-contain px-4 pb-5 pt-20 sm:px-10 sm:pt-28 lg:max-h-[78vh]">
-        <div className="grid grid-cols-[repeat(auto-fill,104px)] justify-center gap-x-9 gap-y-16 sm:grid-cols-[repeat(auto-fill,132px)] sm:gap-y-20">
+      {/* デッキの窓：デッキが増えたら、この中をスクロールする（上の余白は、代表カードが上に出るためのもの。左右の余白は、なし。スマホは3列）。並びは、登録順（手動で並び替えたときは、その順） */}
+      <div tabIndex={0} aria-label="デッキの一覧（スクロールできます）" className="max-h-[60vh] overflow-y-auto overflow-x-hidden overscroll-contain pb-5 pt-16 sm:pt-24 lg:max-h-[78vh]">
+        <div className="grid grid-cols-[repeat(3,84px)] justify-between gap-y-14 sm:grid-cols-[repeat(4,132px)] sm:gap-y-20">
           {cases.decks.map((d, i) => (
             <div
               key={d.id}
