@@ -5,6 +5,7 @@ import { useDeckCases, normalizeRecipe, EMPTY_RECIPE, type CaseStyle, type DeckC
 import { searchDeckCards, DECK_SEARCH_LIMIT } from '../hooks/useDeckCards'
 import { useSetsAdmin, setLabel } from '../hooks/useSetsAdmin'
 import { fetchDecklog, parseDeckCode, resolveDecklog } from '../utils/decklog'
+import { DeckPackGraph } from './DeckPackGraph'
 import { insertByBasicOrder, orderedMain, type DeckCard, type DeckEntry } from '../utils/deckImage'
 import type { RoleInfo } from '../utils/roles'
 import { YELL_COLORS, YELL_COLOR_HEX } from '../types/artsSkills'
@@ -373,6 +374,7 @@ function DeckDetail({ deck, onEdit, onDelete, onClose, onZoom }: { deck: DeckCas
   const holomem = r.main.filter((e) => (e.card.card_type ?? '').includes('ホロメン')).reduce((n, e) => n + e.count, 0)
   const support = r.main.filter((e) => (e.card.card_type ?? '').startsWith('サポート')).reduce((n, e) => n + e.count, 0)
   const over = r.main.filter((e) => e.count > MAX_COPIES)
+  const [tab, setTab] = useState<'cards' | 'graph'>('cards') // カードの一覧／パック収録図
   return (
     <>
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -402,6 +404,18 @@ function DeckDetail({ deck, onEdit, onDelete, onClose, onZoom }: { deck: DeckCas
       </div>
       {over.length > 0 && <p className="mb-3 text-[11px] text-[#ffd76a]">同じカードが{MAX_COPIES}枚を超えています：{over.map((e) => e.card.card_name).join('、')}</p>}
 
+      <div role="tablist" aria-label="表示の切り替え" className="mb-3 flex gap-1 border-b border-[#2a4a52]">
+        {([['cards', 'カード一覧'], ['graph', 'パック収録図']] as const).map(([v, label]) => (
+          <button key={v} type="button" role="tab" aria-selected={tab === v} onClick={() => setTab(v)} className={`-mb-px border-b-2 px-3 py-1.5 text-xs font-bold ${tab === v ? 'border-[#4ce0e6] text-white' : 'border-transparent text-[#9fc3ca] hover:text-white'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'graph' ? (
+        <DeckPackGraph recipe={r} />
+      ) : (
+        <>
       <div className="mb-4 flex flex-wrap gap-6">
         <div>
           <div className="mb-1 text-xs text-[#9fc3ca]">推しホロメン</div>
@@ -443,6 +457,8 @@ function DeckDetail({ deck, onEdit, onDelete, onClose, onZoom }: { deck: DeckCas
             </div>
           ))}
         </div>
+      )}
+        </>
       )}
     </>
   )
