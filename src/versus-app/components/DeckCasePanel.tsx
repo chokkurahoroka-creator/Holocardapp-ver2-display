@@ -88,8 +88,8 @@ function Lightbox({ card, onClose }: { card: DeckCard; onClose: () => void }) {
   )
 }
 
-// ふちの付いた全画面のモーダル（開いている間は、後ろの画面が動かないようにする）
-function Modal({ title, onClose, children }: { title: string; onClose?: () => void; children: React.ReactNode }) {
+// ふちの付いた全画面のモーダル（開いている間は、後ろの画面が動かないようにする）。wide：デッキの詳細（パック収録図を、大きく見せるため）は、幅を広げる
+function Modal({ title, onClose, wide, children }: { title: string; onClose?: () => void; wide?: boolean; children: React.ReactNode }) {
   useEffect(() => {
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
@@ -99,7 +99,7 @@ function Modal({ title, onClose, children }: { title: string; onClose?: () => vo
   }, [])
   return createPortal(
     <div role="dialog" aria-modal="true" aria-label={title} className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto bg-black/75 p-2 sm:p-6" onClick={onClose}>
-      <div className="hud-panel my-auto w-full max-w-5xl p-4" onClick={(e) => e.stopPropagation()}>
+      <div className={`hud-panel my-auto w-full p-4 ${wide ? 'max-w-[min(96vw,1400px)]' : 'max-w-5xl'}`} onClick={(e) => e.stopPropagation()}>
         {children}
       </div>
     </div>,
@@ -1113,7 +1113,7 @@ export function DeckCasePanel({ info }: { info: RoleInfo }) {
         </Modal>
       )}
       {!editing && viewing && (
-        <Modal title={`デッキの詳細：${viewing.name}`} onClose={closeAll}>
+        <Modal title={`デッキの詳細：${viewing.name}`} onClose={closeAll} wide>
           <DeckDetail deck={viewing} onEdit={() => startEdit(viewing)} onDelete={() => void handleDelete(viewing)} onClose={closeAll} onZoom={setZoom} />
         </Modal>
       )}
