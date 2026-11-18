@@ -2,23 +2,26 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSetsAdmin, setLabel } from '../hooks/useSetsAdmin'
 import { loadCardPackInfo, PACK_TYPES, type CardPackInfo, type PackType } from '../utils/packFamilies'
-import { layoutPackGraphByType, CARD_R, HUB_R } from '../utils/packGraphLayout'
+import { layoutPackGraph, CARD_R, HUB_R } from '../utils/packGraphLayout'
 import type { DeckEntry } from '../utils/deckImage'
 import type { DeckRecipeX } from '../hooks/useDeckCases'
 
 // パック収録図（ネットワーク図）：デッキのカードが、どのパックに収録されているかを、線でつないで見せる。
 //   ・パックごとに、丸いグループを作り、中心に、パックの名札（写真・コード・パック名）、その周りに、デッキのカードを並べる
 //   ・カードは、仲間（元カード・再録・パラレル）の中に「新規」があれば、その新規のパックのグループに入る（新規を優先）
-//   ・パックの種類（ブースター・スタートデッキなど）ごとに、大きな円を分けて、その中に、パックのグループを、発売順に並べる
+//   ・すべてのパックのグループを、1つの大きな円の円周に、並べる。パックの種類（ブースター・スタートデッキなど）ごとに、続けて並べ、
+//     種類ごとの範囲を、円周の内側の色つきの弧と、外側の名前で示す（種類の中は、発売順）
 //   ・線の色：新規＝赤、再録＝青、パラレル＝黄。カードから、そのカードが収録されているパックの名札へ、線を引く
-//   ・パックにカーソルを乗せる（スマホは、タップ）と、そのパックが拡大して、グループのカードが、周りに広がり、新規の線が、長く伸びる
+//   ・パックにカーソルを乗せる（スマホは、タップ）と、そのパックが拡大し（名札は約2.5倍）、そのパックに収録されている（関係する）カードのアイコンが2倍になり、グループのカードが、周りに大きく広がって、
+//     新規の線が、長く伸びる。大きな円からはみ出す場合は、はみ出さない位置まで、中心へ寄る。そのパックで再録のカードは、縁が青になる
 //   ・カード・パックを、クリック（タップ）すると、そのカード・パックに関係する線だけを、強調する
 
 export const PACK_LINK_COLOR: Record<PackType, string> = { 新規: '#ff4d4d', 再録: '#4da3ff', パラレル: '#ffd23f' }
 
-const EXPAND_GAIN = 0.55 // 拡大したときの、カードの位置（名札からの距離）の伸び
-const HUB_ZOOM = 0.8 // 拡大したときの、名札の大きさの伸び
-const CARD_ZOOM = 0.2 // 拡大したときの、カードの大きさの伸び
+const EXPAND_GAIN = 1.2 // 拡大したときの、カードの位置（名札からの距離）の伸び（1 + 1.2 ＝ 2.2倍）
+const HUB_ZOOM = 1.5 // 拡大したときの、名札の大きさの伸び（1 + 1.5 ＝ 2.5倍）
+const CARD_ZOOM = 1.0 // 拡大したときの、カードのアイコンの大きさの伸び（1 + 1.0 ＝ 2倍）
+const TYPE_COLORS = ['#4ce0e6', '#c58bff', '#ffb454', '#7bdc8a', '#ff8fb0', '#9fb4ff'] // パックの種類ごとの色（弧・グループの円の縁）
 const EXPAND_MS = 260
 const HOVER_LEAVE_MS = 180 // カーソルが外れてから、閉じるまでの、猶予（名札からカードへ、移る間に、閉じないように）
 
@@ -112,8 +115,8 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
   }
   const toggle = (a: NonNullable<Active>) => setSelected((cur) => (sameActive(cur, a) ? null : a))
 
-  // ---- 配置：パックの種類ごとの円 → パック（発売順）のグループ。カードは、新規のパックのグループに入れる ----
-  const { layout, hubs, cardPos } = useMemo(() => {
+  // ---- 配置：すべてのパックを、1つの円周に。パックの種類ごとに続けて（種類の順 → 発売順）並べる ----
+  const { layout, groupMap, cardPos, typeSpans } = useMemo(() => {
     const packCodes = new Set<string>()
     infos.forEach((i) => {
       packCodes.add(i.homePack)
@@ -124,37 +127,66 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
     const types = Array.from(byType.entries())
       .map(([typeName, codes]) => {
         const sorted = codes.sort((a, b) => packRank(a) - packRank(b) || a.localeCompare(b))
-        return {
-          typeName,
-          rank: packRank(sorted[0] ?? ''),
-          groups: sorted.map((code) => ({
-            packCode: code,
-            items: infos.filter((i) => i.homePack === code).sort((a, b) => typeOrder(a.ownType) - typeOrder(b.ownType) || a.card.slot - b.card.slot || a.card.id - b.card.id),
-          })),
-        }
+        return { typeName, rank: packRank(sorted[0] ?? ''), codes: sorted }
       })
       .sort((a, b) => a.rank - b.rank || a.typeName.localeCompare(b.typeName))
-    const l = layoutPackGraphByType(types)
-    const hubMap = new Map<string, { x: number; y: number }>()
-    const posMap = new Map<number, { x: number; y: number; cx: number; cy: number; pack: string }>()
-    l.clusters.forEach((c) =>
-      c.groups.forEach((g) => {
-        hubMap.set(g.packCode, { x: g.cx, y: g.cy })
-        g.items.forEach((it) => posMap.set(it.item.card.id, { x: it.x, y: it.y, cx: g.cx, cy: g.cy, pack: g.packCode }))
-      }),
+    const ordered = types.flatMap((t) => t.codes.map((code) => ({ code, typeName: t.typeName })))
+    const l = layoutPackGraph(
+      ordered.map(({ code }) => ({
+        packCode: code,
+        items: infos.filter((i) => i.homePack === code).sort((a, b) => typeOrder(a.ownType) - typeOrder(b.ownType) || a.card.slot - b.card.slot || a.card.id - b.card.id),
+      })),
     )
-    return { layout: l, hubs: hubMap, cardPos: posMap }
+    const gMap = new Map(l.groups.map((g) => [g.packCode, g]))
+    const posMap = new Map<number, { x: number; y: number; cx: number; cy: number; pack: string }>()
+    l.groups.forEach((g) => g.items.forEach((it) => posMap.set(it.item.card.id, { x: it.x, y: it.y, cx: g.cx, cy: g.cy, pack: g.packCode })))
+
+    // 種類ごとの範囲（円周上の、角度）。種類が2つ以上のときだけ、弧と名前を出す
+    const spans: { typeName: string; color: string; a0: number; a1: number; mid: number }[] = []
+    if (types.length >= 2 && l.groups.length >= 2) {
+      let prev = -Infinity
+      const angles = l.groups.map((g) => {
+        let ang = Math.atan2(g.cy, g.cx)
+        while (ang < prev) ang += 2 * Math.PI // 円周を、時計回りに、たどる（角度が、増え続けるようにそろえる）
+        prev = ang
+        return { ang, half: Math.asin(Math.min(0.99, g.r / (Math.hypot(g.cx, g.cy) || 1))) }
+      })
+      let index = 0
+      types.forEach((t, ti) => {
+        const first = angles[index]
+        const last = angles[index + t.codes.length - 1]
+        index += t.codes.length
+        if (!first || !last) return
+        const a0 = first.ang - first.half
+        const a1 = last.ang + last.half
+        spans.push({ typeName: t.typeName, color: TYPE_COLORS[ti % TYPE_COLORS.length] ?? '#4ce0e6', a0, a1, mid: (a0 + a1) / 2 })
+      })
+    }
+    return { layout: l, groupMap: gMap, cardPos: posMap, typeSpans: spans }
   }, [infos, packRank, packType])
 
   // 拡大中のパックの倍率
   const spread = (code: string) => (code === focusCode ? 1 + EXPAND_GAIN * expand : 1)
   const hubScale = (code: string) => (code === focusCode ? 1 + HUB_ZOOM * expand : 1)
-  const cardScale = (code: string) => (code === focusCode ? 1 + CARD_ZOOM * expand : 1)
+  // 拡大中のパックに収録されている（関係する）カードは、どのグループにいても、アイコンが大きくなる
+  const isRelated = (info: CardPackInfo) => !!focusCode && info.memberships.some((m) => m.packCode === focusCode)
+  const cardScale = (info: CardPackInfo) => (isRelated(info) ? 1 + CARD_ZOOM * expand : 1)
+  // グループの、今の中心の位置：拡大中は、大きくなった円が、いちばん大きな円からはみ出さないように、中心へ寄る
+  const groupCenter = (code: string) => {
+    const g = groupMap.get(code)
+    if (!g) return { x: 0, y: 0 }
+    if (code !== focusCode) return { x: g.cx, y: g.cy }
+    const dist = Math.hypot(g.cx, g.cy)
+    const limit = Math.max(0, layout.outerR - 8 - g.r * spread(code))
+    const k = dist > limit && dist > 0 ? limit / dist : 1
+    return { x: g.cx * k, y: g.cy * k }
+  }
   const nowPos = (id: number) => {
     const p = cardPos.get(id)
     if (!p) return null
     const f = spread(p.pack)
-    return { x: p.cx + (p.x - p.cx) * f, y: p.cy + (p.y - p.cy) * f, pack: p.pack }
+    const c = groupCenter(p.pack)
+    return { x: c.x + (p.x - p.cx) * f, y: c.y + (p.y - p.cy) * f, pack: p.pack }
   }
 
   // 線：カードごとに、収録されているパック（区分ごと）へ。同じカード→同じパックに、複数の線があるときは、曲げて、ずらす
@@ -165,9 +197,9 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
     info.memberships.forEach((m) => byPack.set(m.packCode, [...(byPack.get(m.packCode) ?? []), m.type]))
     const out: { key: string; cardId: number; pack: string; type: PackType; d: string }[] = []
     byPack.forEach((types, pack) => {
-      const to = hubs.get(pack)
-      if (!to) return
-      types.forEach((type, i) => out.push({ key: `${info.card.id}|${pack}|${type}`, cardId: info.card.id, pack, type, d: linkPath(from.x, from.y, to.x, to.y, (i - (types.length - 1) / 2) * 12, CARD_R * cardScale(from.pack), HUB_R * hubScale(pack)) }))
+      if (!groupMap.has(pack)) return
+      const to = groupCenter(pack)
+      types.forEach((type, i) => out.push({ key: `${info.card.id}|${pack}|${type}`, cardId: info.card.id, pack, type, d: linkPath(from.x, from.y, to.x, to.y, (i - (types.length - 1) / 2) * 12, CARD_R * cardScale(info), HUB_R * hubScale(pack)) }))
     })
     return out
   })
@@ -190,9 +222,24 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
     return activeInfo && packsOf(activeInfo).has(code) ? 1 : 0.45
   }
 
+  // カードの縁の色：ふだんは、デッキに入っているカードの区分の色。拡大しているパックで「再録」のカードは、青にする（外れると、元に戻る）
+  const ringColor = (info: CardPackInfo) => (wantedFocus && info.memberships.some((m) => m.packCode === wantedFocus && m.type === '再録') ? PACK_LINK_COLOR['再録'] : info.ownType ? PACK_LINK_COLOR[info.ownType] : '#9aa5a8')
+
+  // 表示範囲：いちばん大きな円と、種類の名前（円の外側）が、入る大きさ
   const R = layout.outerR
-  const allGroups = layout.clusters.flatMap((c) => c.groups)
-  const groupsInOrder = [...allGroups.filter((g) => g.packCode !== focusCode), ...allGroups.filter((g) => g.packCode === focusCode)] // 拡大中のパックは、いちばん手前
+  const typeLabels = typeSpans.map((t) => {
+    const lx = (R + 10) * Math.cos(t.mid)
+    const ly = (R + 10) * Math.sin(t.mid)
+    const anchor: 'start' | 'end' | 'middle' = Math.cos(t.mid) > 0.3 ? 'start' : Math.cos(t.mid) < -0.3 ? 'end' : 'middle'
+    const w = t.typeName.length * 11 + 6
+    const x0 = anchor === 'start' ? lx : anchor === 'end' ? lx - w : lx - w / 2
+    return { ...t, lx, ly: ly + (Math.sin(t.mid) > 0.3 ? 8 : Math.sin(t.mid) < -0.3 ? -8 : 0), anchor, x0, x1: x0 + w }
+  })
+  const minX = Math.min(-R, ...typeLabels.map((t) => t.x0)) - 6
+  const maxX = Math.max(R, ...typeLabels.map((t) => t.x1)) + 6
+  const minY = Math.min(-R, ...typeLabels.map((t) => t.ly - 10)) - 6
+  const maxY = Math.max(R, ...typeLabels.map((t) => t.ly + 10)) + 6
+  const allGroups = layout.groups
   const packCountLine = (code: string) => {
     const per: Record<PackType, number> = { 新規: 0, 再録: 0, パラレル: 0 }
     infos.forEach((i) => i.memberships.filter((m) => m.packCode === code).forEach((m) => (per[m.type] += 1)))
@@ -203,6 +250,114 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
     return url ? <img src={url} alt="" loading="lazy" className="shrink-0 rounded-sm object-cover" style={{ width: w, height: h }} /> : null
   }
 
+  // 名札・カードの描き方（重なる順番は、下の「描く順番」を参照）
+  const renderHub = (g: (typeof allGroups)[number]) => {
+    const label = packLabel(g.packCode)
+    const img = packImage(g.packCode)
+    const hs = hubScale(g.packCode)
+    const hubClip = `pg-hub-${allGroups.indexOf(g)}-${g.packCode.replace(/[^0-9A-Za-z_-]/g, '_')}`
+    const isFocus = g.packCode === focusCode
+    return (
+      <g
+        key={`hub-${g.packCode}`}
+        transform={`translate(${groupCenter(g.packCode).x} ${groupCenter(g.packCode).y}) scale(${hs})`}
+        opacity={hubOpacity(g.packCode)}
+        tabIndex={0}
+        role="button"
+        aria-label={`パック ${label}`}
+        style={{ cursor: 'pointer', outline: 'none' }}
+        onMouseEnter={() => enter({ kind: 'pack', code: g.packCode })}
+        onMouseLeave={leave}
+        onFocus={() => enter({ kind: 'pack', code: g.packCode })}
+        onBlur={leave}
+        onClick={(e) => {
+          e.stopPropagation()
+          toggle({ kind: 'pack', code: g.packCode })
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            toggle({ kind: 'pack', code: g.packCode })
+          }
+        }}
+      >
+        <title>{`${label}（${g.packCode}／${packType(g.packCode)}）`}</title>
+        <clipPath id={hubClip}>
+          <circle r={HUB_R - 1} />
+        </clipPath>
+        <circle r={HUB_R} fill="#0b1e26" stroke="#4ce0e6" strokeWidth={(active?.kind === 'pack' && active.code === g.packCode ? 2.5 : 1.5) / hs} />
+        {img && (
+          <>
+            <image href={img} x={-HUB_R} y={-HUB_R} width={2 * HUB_R} height={2 * HUB_R} preserveAspectRatio="xMidYMid slice" clipPath={`url(#${hubClip})`} />
+            <rect x={-HUB_R} y={3} width={2 * HUB_R} height={HUB_R} fill="rgba(4, 18, 24, 0.8)" clipPath={`url(#${hubClip})`} />
+          </>
+        )}
+        <text textAnchor="middle" y={img ? 13 : -2} fontSize={g.packCode.length > 6 ? 8 : 10} fontWeight={700} fill="#ffffff" style={{ fontFamily: 'ui-monospace, monospace' }}>
+          {g.packCode}
+        </text>
+        <text textAnchor="middle" y={img ? 23 : 9} fontSize={6.5} fill="#cfe6ea">
+          {label.length > 8 ? `${label.slice(0, 7)}…` : label}
+        </text>
+        {/* 拡大したときは、パック名の全体を、名札の下に出す */}
+        {isFocus && expand > 0.5 && (
+          <text textAnchor="middle" y={HUB_R + 10} fontSize={8} fontWeight={700} fill="#ffffff" stroke="#071820" strokeWidth={3} paintOrder="stroke" opacity={Math.min(1, (expand - 0.5) * 2)}>
+            {label}
+          </text>
+        )}
+      </g>
+    )
+  }
+  const renderCard = (info: CardPackInfo) => {
+    const p = nowPos(info.card.id)
+    if (!p) return null
+    const count = counts.get(info.card.id) ?? 1
+    const ring = ringColor(info)
+    const clipId = `pg-clip-${info.card.id}`
+    const isActive = active?.kind === 'card' && active.id === info.card.id
+    const cs = cardScale(info)
+    return (
+      <g
+        key={info.card.id}
+        transform={`translate(${p.x} ${p.y}) scale(${cs})`}
+        opacity={cardOpacity(info)}
+        tabIndex={0}
+        role="button"
+        aria-label={`${info.card.card_name}（${info.ownType ?? ''}）`}
+        style={{ cursor: 'pointer', outline: 'none' }}
+        onMouseEnter={() => enter({ kind: 'card', id: info.card.id })}
+        onMouseLeave={leave}
+        onFocus={() => enter({ kind: 'card', id: info.card.id })}
+        onBlur={leave}
+        onClick={(e) => {
+          e.stopPropagation()
+          toggle({ kind: 'card', id: info.card.id })
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            toggle({ kind: 'card', id: info.card.id })
+          }
+        }}
+      >
+        <title>{`${info.card.card_name}（${info.ownType ?? ''}・${info.card.set_code}）`}</title>
+        <clipPath id={clipId}>
+          <circle r={CARD_R - 1.5} />
+        </clipPath>
+        <circle r={CARD_R} fill="#26324f" stroke={ring} strokeWidth={isActive ? 4 : 2.5} style={{ transition: 'stroke 0.2s' }} />
+        {info.card.image_url && <image href={info.card.image_url} x={-(CARD_R - 1.5)} y={-CARD_R - 2} width={2 * (CARD_R - 1.5)} height={(2 * (CARD_R - 1.5) * 88) / 63} preserveAspectRatio="xMidYMin slice" clipPath={`url(#${clipId})`} />}
+        {count > 1 && (
+          <g transform={`translate(${CARD_R - 3} ${CARD_R - 3})`}>
+            <circle r={7} fill="#0a0f1e" stroke="#ffffff" strokeWidth={0.8} />
+            <text textAnchor="middle" y={2.6} fontSize={7.5} fontWeight={700} fill="#ffffff">
+              {count}
+            </text>
+          </g>
+        )}
+      </g>
+    )
+  }
+  const allInfos = layout.groups.flatMap((g) => g.items.map((it) => it.item))
+
   return (
     <div>
       <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[#d7eef2]">
@@ -212,30 +367,34 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
             {t}
           </span>
         ))}
-        <span className="text-[10px] text-[#9fc3ca]">（カードの縁の色＝デッキに入っているカードの区分。パックにカーソルを乗せる／タップすると、拡大します）</span>
+        <span className="text-[10px] text-[#9fc3ca]">（カードの縁の色＝デッキに入っているカードの区分。パックにカーソルを乗せる／タップすると、拡大し、そのパックで再録のカードの縁が、青になります）</span>
       </div>
 
       <div className="overflow-x-auto">
-        <svg viewBox={`${-R} ${-R} ${2 * R} ${2 * R}`} className="mx-auto block w-full min-w-[420px] max-w-[760px]" role="img" aria-label="デッキのカードが収録されているパックの図" onClick={() => setSelected(null)}>
+        <svg viewBox={`${minX} ${minY} ${maxX - minX} ${maxY - minY}`} className="mx-auto block w-full min-w-[420px] max-w-[760px]" role="img" aria-label="デッキのカードが収録されているパックの図" onClick={() => setSelected(null)}>
           {/* いちばん大きな円 */}
           <circle r={R - 1} fill="rgba(76, 224, 230, 0.03)" stroke="#2a4a52" strokeWidth={1} />
 
-          {/* パックの種類ごとの円（種類が2つ以上のときだけ） */}
-          {layout.clusters.length > 1 &&
-            layout.clusters.map((c) => (
-              <g key={c.typeName} pointerEvents="none">
-                <circle cx={c.cx} cy={c.cy} r={c.r} fill="rgba(76, 224, 230, 0.03)" stroke="#3a6a74" strokeWidth={1.2} strokeDasharray="5 4" />
-                <rect x={c.cx - (c.typeName.length * 10 + 18) / 2} y={c.cy - c.r - 9} width={c.typeName.length * 10 + 18} height={18} rx={9} fill="#0b1e26" stroke="#3a6a74" strokeWidth={1} />
-                <text x={c.cx} y={c.cy - c.r + 4} textAnchor="middle" fontSize={10} fontWeight={700} fill="#d7eef2">
-                  {c.typeName}
+          {/* パックの種類ごとの範囲：円周の内側の弧と、外側の名前（種類が2つ以上のときだけ） */}
+          {typeLabels.map((t) => {
+            const ar = R - 7
+            const large = t.a1 - t.a0 > Math.PI ? 1 : 0
+            return (
+              <g key={t.typeName} pointerEvents="none" data-role="type-arc">
+                <path d={`M${(ar * Math.cos(t.a0)).toFixed(1)},${(ar * Math.sin(t.a0)).toFixed(1)} A${ar},${ar} 0 ${large} 1 ${(ar * Math.cos(t.a1)).toFixed(1)},${(ar * Math.sin(t.a1)).toFixed(1)}`} fill="none" stroke={t.color} strokeWidth={5} strokeLinecap="round" opacity={0.85} />
+                <text x={t.lx} y={t.ly} textAnchor={t.anchor} dominantBaseline="middle" fontSize={11} fontWeight={700} fill={t.color}>
+                  {t.typeName}
                 </text>
               </g>
-            ))}
+            )
+          })}
 
           {/* パックごとのグループの円（拡大中は、広がる） */}
           {allGroups.map((g) => {
             const on = g.packCode === focusCode
-            return <circle key={g.packCode} cx={g.cx} cy={g.cy} r={g.r * spread(g.packCode)} fill={on ? 'rgba(76, 224, 230, 0.1)' : 'rgba(76, 224, 230, 0.05)'} stroke={on ? '#4ce0e6' : '#2a4a52'} strokeWidth={on ? 1.6 : 1} />
+            const c = groupCenter(g.packCode)
+            const typeColor = typeSpans.find((t) => t.typeName === packType(g.packCode))?.color
+            return <circle key={g.packCode} cx={c.x} cy={c.y} r={g.r * spread(g.packCode)} fill={on ? 'rgba(76, 224, 230, 0.1)' : 'rgba(76, 224, 230, 0.05)'} stroke={on ? '#4ce0e6' : (typeColor ?? '#2a4a52')} strokeOpacity={on ? 1 : typeColor ? 0.55 : 1} strokeWidth={on ? 1.6 : 1} />
           })}
 
           {/* 線（カードの下に描く） */}
@@ -246,113 +405,11 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
           </g>
 
           {/* パックの名札・カード（拡大中のパックは、最後＝手前に描く） */}
-          {groupsInOrder.map((g, gi) => {
-            const label = packLabel(g.packCode)
-            const img = packImage(g.packCode)
-            const hs = hubScale(g.packCode)
-            const hubClip = `pg-hub-${gi}-${g.packCode.replace(/[^0-9A-Za-z_-]/g, '_')}`
-            const isFocus = g.packCode === focusCode
-            return (
-              <g key={g.packCode}>
-                <g
-                  transform={`translate(${g.cx} ${g.cy}) scale(${hs})`}
-                  opacity={hubOpacity(g.packCode)}
-                  tabIndex={0}
-                  role="button"
-                  aria-label={`パック ${label}`}
-                  style={{ cursor: 'pointer', outline: 'none' }}
-                  onMouseEnter={() => enter({ kind: 'pack', code: g.packCode })}
-                  onMouseLeave={leave}
-                  onFocus={() => enter({ kind: 'pack', code: g.packCode })}
-                  onBlur={leave}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    toggle({ kind: 'pack', code: g.packCode })
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault()
-                      toggle({ kind: 'pack', code: g.packCode })
-                    }
-                  }}
-                >
-                  <title>{`${label}（${g.packCode}／${packType(g.packCode)}）`}</title>
-                  <clipPath id={hubClip}>
-                    <circle r={HUB_R - 1} />
-                  </clipPath>
-                  <circle r={HUB_R} fill="#0b1e26" stroke="#4ce0e6" strokeWidth={(active?.kind === 'pack' && active.code === g.packCode ? 2.5 : 1.5) / hs} />
-                  {img && (
-                    <>
-                      <image href={img} x={-HUB_R} y={-HUB_R} width={2 * HUB_R} height={2 * HUB_R} preserveAspectRatio="xMidYMid slice" clipPath={`url(#${hubClip})`} />
-                      <rect x={-HUB_R} y={3} width={2 * HUB_R} height={HUB_R} fill="rgba(4, 18, 24, 0.8)" clipPath={`url(#${hubClip})`} />
-                    </>
-                  )}
-                  <text textAnchor="middle" y={img ? 13 : -2} fontSize={g.packCode.length > 6 ? 8 : 10} fontWeight={700} fill="#ffffff" style={{ fontFamily: 'ui-monospace, monospace' }}>
-                    {g.packCode}
-                  </text>
-                  <text textAnchor="middle" y={img ? 23 : 9} fontSize={6.5} fill="#cfe6ea">
-                    {label.length > 8 ? `${label.slice(0, 7)}…` : label}
-                  </text>
-                  {/* 拡大したときは、パック名の全体を、名札の下に出す */}
-                  {isFocus && expand > 0.5 && (
-                    <text textAnchor="middle" y={HUB_R + 10} fontSize={8} fontWeight={700} fill="#ffffff" stroke="#071820" strokeWidth={3} paintOrder="stroke" opacity={Math.min(1, (expand - 0.5) * 2)}>
-                      {label}
-                    </text>
-                  )}
-                </g>
-
-                {g.items.map(({ item: info }) => {
-                  const p = nowPos(info.card.id)
-                  if (!p) return null
-                  const count = counts.get(info.card.id) ?? 1
-                  const ring = info.ownType ? PACK_LINK_COLOR[info.ownType] : '#9aa5a8'
-                  const clipId = `pg-clip-${info.card.id}`
-                  const isActive = active?.kind === 'card' && active.id === info.card.id
-                  const cs = cardScale(g.packCode)
-                  return (
-                    <g
-                      key={info.card.id}
-                      transform={`translate(${p.x} ${p.y}) scale(${cs})`}
-                      opacity={cardOpacity(info)}
-                      tabIndex={0}
-                      role="button"
-                      aria-label={`${info.card.card_name}（${info.ownType ?? ''}）`}
-                      style={{ cursor: 'pointer', outline: 'none' }}
-                      onMouseEnter={() => enter({ kind: 'card', id: info.card.id })}
-                      onMouseLeave={leave}
-                      onFocus={() => enter({ kind: 'card', id: info.card.id })}
-                      onBlur={leave}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        toggle({ kind: 'card', id: info.card.id })
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault()
-                          toggle({ kind: 'card', id: info.card.id })
-                        }
-                      }}
-                    >
-                      <title>{`${info.card.card_name}（${info.ownType ?? ''}・${info.card.set_code}）`}</title>
-                      <clipPath id={clipId}>
-                        <circle r={CARD_R - 1.5} />
-                      </clipPath>
-                      <circle r={CARD_R} fill="#26324f" stroke={ring} strokeWidth={isActive ? 4 : 2.5} />
-                      {info.card.image_url && <image href={info.card.image_url} x={-(CARD_R - 1.5)} y={-CARD_R - 2} width={2 * (CARD_R - 1.5)} height={(2 * (CARD_R - 1.5) * 88) / 63} preserveAspectRatio="xMidYMin slice" clipPath={`url(#${clipId})`} />}
-                      {count > 1 && (
-                        <g transform={`translate(${CARD_R - 3} ${CARD_R - 3})`}>
-                          <circle r={7} fill="#0a0f1e" stroke="#ffffff" strokeWidth={0.8} />
-                          <text textAnchor="middle" y={2.6} fontSize={7.5} fontWeight={700} fill="#ffffff">
-                            {count}
-                          </text>
-                        </g>
-                      )}
-                    </g>
-                  )
-                })}
-              </g>
-            )
-          })}
+          {/* 描く順番（下から）：①拡大していないパックの名札 → ②関係のないカード → ③拡大中のパックの名札 → ④関係するカード（どのグループにいても、いちばん手前） */}
+          {allGroups.filter((g) => g.packCode !== focusCode).map(renderHub)}
+          {allInfos.filter((i) => !isRelated(i)).map(renderCard)}
+          {allGroups.filter((g) => g.packCode === focusCode).map(renderHub)}
+          {allInfos.filter(isRelated).map(renderCard)}
         </svg>
       </div>
 
