@@ -13,8 +13,11 @@ import type { DeckRecipeX } from '../hooks/useDeckCases'
 //     種類ごとの範囲を、円周の内側の色つきの弧と、外側の名前（円弧に沿って）で示す（種類の中は、発売順）
 //   ・パックの外枠（グループの円・名札の縁）は、パックの種類の色にそろえる
 //   ・線の色：新規＝赤、再録＝青、パラレル＝黄。カードから、そのカードが収録されているパックの名札へ、線を引く
-//   ・カードにカーソルを乗せる（スマホは、タップ）と、そのカードのアイコンが1.5倍になる
-//   ・パックにカーソルを乗せる（スマホは、タップ）、またはそのパックのカードにカーソルを乗せると、ほかのパックが薄くなり、そのパックが拡大する：
+//   ・パックの中のカードは、パックの名札から見て、全体の円の中心に向かう点を、1枚目として、並べる
+//   ・カードにカーソルを乗せる（スマホは、タップ）と、そのカードのアイコンが、今の大きさの1.5倍になる
+//   ・パックの名札だけでなく、パックの範囲の外枠（グループの円）にカーソルを乗せても（スマホは、タップ）、そのパックが拡大する。
+//     関係するカードがいる、ほかのパックは、明るくなり、1.2倍になる（名札・外枠とも）。
+//     パックにカーソルを乗せる、またはそのパックのカードにカーソルを乗せると、ほかのパックが薄くなり、そのパックが拡大する：
 //     名札は約2.5倍、そのパックに収録されている（関係する）カードのアイコンは2倍。グループのカードは、見やすいよう、ゆったりと広がり直す。
 //     拡大した円が、周りのパックを隠すときは、周りのパックを、円周に沿って、見える位置へずらす。大きな円からはみ出す場合は、はみ出さない位置まで、中心へ寄る。
 //     そのパックで再録のカードは、縁が青になる
@@ -25,7 +28,8 @@ export const PACK_LINK_COLOR: Record<PackType, string> = { 新規: '#ff4d4d', �
 
 const HUB_ZOOM = 1.5 // 拡大したときの、名札の大きさの伸び（1 + 1.5 ＝ 2.5倍）
 const CARD_ZOOM = 1.0 // 拡大したときの、関係カードのアイコンの大きさの伸び（1 + 1.0 ＝ 2倍）
-const HOVER_ZOOM = 1.5 // カードにカーソル（タップ）を乗せたときの、そのカードのアイコンの倍率
+const HOVER_ZOOM = 1.5 // カードにカーソル（タップ）を乗せたときの、そのカードのアイコンの倍率（今の大きさに、かける）
+const EMPH_ZOOM = 1.2 // 関係カードがいる、ほかのパックを強調するときの、名札・外枠の倍率
 const EXPAND_MS = 260
 const HOVER_LEAVE_MS = 180 // カーソルが外れてから、閉じるまでの、猶予（名札からカードへ、移る間に、閉じないように）
 const LINK_WIDTH = 1.6 // 線の太さ（ふだん）
@@ -312,6 +316,13 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
   const isRelated = (info: CardPackInfo) => !!focusCode && info.memberships.some((m) => m.packCode === focusCode)
   const isHoveredCard = (info: CardPackInfo) => active?.kind === 'card' && active.id === info.card.id
   const cardScale = (info: CardPackInfo) => (isRelated(info) ? 1 + CARD_ZOOM * expand : 1)
+  // グループの向き：元の並びは、1枚目が真上。名札から見て、全体の円の中心の向きへ、回す角度（ずれたパックは、今の位置から見た向き）
+  const rotationOf = (code: string) => {
+    const c = code === focusCode ? allGroups.find((g) => g.packCode === code) : groupNow(code)
+    const cx = c?.cx ?? 0
+    const cy = c?.cy ?? 0
+    return (Math.hypot(cx, cy) < 1e-6 ? -Math.PI / 2 : Math.atan2(-cy, -cx)) + Math.PI / 2
+  }
   const nowPos = (id: number) => {
     const p = cardPos.get(id)
     if (!p) return null
@@ -325,7 +336,11 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
         ry += (ex.y - ry) * expand
       }
     }
-    return { x: gn.cx + rx, y: gn.cy + ry, pack: p.pack }
+    // 1枚目のカードが、パックの名札から見て、全体の円の中心の向きに来るよう、グループ全体を回す
+    const rot = rotationOf(p.pack)
+    const cos = Math.cos(rot)
+    const sin = Math.sin(rot)
+    return { x: gn.cx + rx * cos - ry * sin, y: gn.cy + rx * sin + ry * cos, pack: p.pack }
   }
 
   // 線：カードごとに、収録されているパック（区分ごと）へ。同じカード→同じパックに、複数の線があるときは、曲げて、ずらす
@@ -338,7 +353,7 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
     byPack.forEach((types, pack) => {
       if (!nowGroups.has(pack)) return
       const to = groupNow(pack)
-      types.forEach((type, i) => out.push({ key: `${info.card.card_name}-${info.card.id}|${pack}|${type}`, cardId: info.card.id, pack, type, d: linkPath(from.x, from.y, to.cx, to.cy, (i - (types.length - 1) / 2) * 12, CARD_R * Math.max(cardScale(info), isHoveredCard(info) ? HOVER_ZOOM : 1), HUB_R * hubScale(pack)) }))
+      types.forEach((type, i) => out.push({ key: `${info.card.card_name}-${info.card.id}|${pack}|${type}`, cardId: info.card.id, pack, type, d: linkPath(from.x, from.y, to.cx, to.cy, (i - (types.length - 1) / 2) * 12, CARD_R * cardScale(info) * (isHoveredCard(info) ? HOVER_ZOOM : 1), HUB_R * hubScale(pack)) }))
     })
     return out
   })
@@ -348,8 +363,17 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
   const activeInfo = active?.kind === 'card' ? infos.find((i) => i.card.id === active.id) : undefined
   // 薄くしない（はっきり見せる）パック：拡大中のパック＋（カードにカーソルのときは）そのカードが収録されているパック
   const brightPacks = new Set<string>()
-  if (wantedFocus) brightPacks.add(wantedFocus)
-  if (activeInfo) packsOf(activeInfo).forEach((c) => brightPacks.add(c))
+  // 強調するパック：拡大中のパックに収録されている（関係する）カードがいる、ほかのパック＋（カードにカーソルのときは）そのカードが収録されているパック。明るく、1.2倍にする
+  const emphPacks = new Set<string>()
+  if (wantedFocus) {
+    brightPacks.add(wantedFocus)
+    infos.forEach((i) => {
+      if (i.memberships.some((m) => m.packCode === wantedFocus)) emphPacks.add(i.homePack)
+    })
+  }
+  if (activeInfo) packsOf(activeInfo).forEach((c) => emphPacks.add(c))
+  if (wantedFocus) emphPacks.delete(wantedFocus)
+  emphPacks.forEach((c) => brightPacks.add(c))
   const dimming = brightPacks.size > 0 // パックを選んでいる／カードにカーソルがあるとき、ほかを薄くする
   const packOpacity = (code: string) => (!dimming || brightPacks.has(code) ? 1 : DIM_OPACITY)
   const cardOpacity = (info: CardPackInfo) => {
@@ -489,6 +513,7 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
     const gn = groupNow(g.packCode)
     const hubClip = `pg-hub-${allGroups.indexOf(g)}-${g.packCode.replace(/[^0-9A-Za-z_-]/g, '_')}`
     const isFocus = g.packCode === focusCode
+    const emph = emphPacks.has(g.packCode)
     return (
       <g
         key={`hub-${g.packCode}`}
@@ -514,10 +539,13 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
         }}
       >
         <title>{`${label}（${g.packCode}／${packType(g.packCode)}）`}</title>
+        <g style={{ transform: `scale(${emph ? EMPH_ZOOM : 1})`, transformBox: 'view-box', transformOrigin: '0 0', transition: 'transform 0.2s ease-out' }}>
         <clipPath id={hubClip}>
           <circle r={HUB_R - 1} />
         </clipPath>
-        <circle r={HUB_R} fill="#0b1e26" stroke={typeColorOf(g.packCode)} strokeWidth={(active?.kind === 'pack' && active.code === g.packCode ? 3 : 2) / hs} />
+        {/* 強調するパックは、白い輪で、明るくする */}
+        {emph && <circle r={HUB_R + 4} fill="none" stroke="#ffffff" strokeWidth={2.4 / hs} opacity={0.85} />}
+        <circle r={HUB_R} fill="#0b1e26" stroke={typeColorOf(g.packCode)} strokeWidth={((active?.kind === 'pack' && active.code === g.packCode) || emph ? 3 : 2) / hs} />
         {img && (
           <>
             <image href={img} x={-HUB_R} y={-HUB_R} width={2 * HUB_R} height={2 * HUB_R} preserveAspectRatio="xMidYMid slice" clipPath={`url(#${hubClip})`} />
@@ -530,12 +558,13 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
         <text textAnchor="middle" y={img ? 23 : 9} fontSize={6.5} fill="#cfe6ea">
           {label.length > 8 ? `${label.slice(0, 7)}…` : label}
         </text>
-        {/* 拡大したときは、パック名の全体を、名札の下に出す */}
-        {isFocus && expand > 0.5 && (
-          <text textAnchor="middle" y={HUB_R + 10} fontSize={8} fontWeight={700} fill="#ffffff" stroke="#071820" strokeWidth={3} paintOrder="stroke" opacity={Math.min(1, (expand - 0.5) * 2)}>
+        {/* 拡大・強調したときは、パック名の全体を、名札の下に出す */}
+        {((isFocus && expand > 0.5) || emph) && (
+          <text textAnchor="middle" y={HUB_R + 10} fontSize={8} fontWeight={700} fill="#ffffff" stroke="#071820" strokeWidth={3} paintOrder="stroke" opacity={isFocus ? Math.min(1, (expand - 0.5) * 2) : 1}>
             {label}
           </text>
         )}
+        </g>
       </g>
     )
   }
@@ -547,7 +576,7 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
     const clipId = `pg-clip-${info.card.id}`
     const isActive = isHoveredCard(info)
     const cs = cardScale(info)
-    const hoverFactor = isActive ? Math.max(1, HOVER_ZOOM / cs) : 1 // 拡大中のパックの関係カード（2倍）は、そのまま。それ以外は、1.5倍になるよう、足りない分だけ大きくする
+    const hoverFactor = isActive ? HOVER_ZOOM : 1 // 今の大きさ（拡大中のパックの関係カードは2倍）の、1.5倍
     return (
       <g
         key={info.card.id}
@@ -761,7 +790,7 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
             {t}
           </span>
         ))}
-        <span className="text-[10px] text-[#9fc3ca]">（カードの縁の色＝デッキに入っているカードの区分。カードにカーソルを乗せる／タップ：1.5倍。パックにカーソルを乗せる／タップ：そのパックが拡大し、ほかのパックが薄くなり、そのパックで再録のカードの縁が、青になります）</span>
+        <span className="text-[10px] text-[#9fc3ca]">（カードの縁の色＝デッキに入っているカードの区分。カードにカーソルを乗せる／タップ：1.5倍。パックの名札・外枠にカーソルを乗せる／タップ：そのパックが拡大し、関係カードがいるほかのパックは明るく1.2倍になり、それ以外が薄くなり、そのパックで再録のカードの縁が、青になります）</span>
       </div>
 
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
@@ -805,9 +834,32 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
               {/* パックごとのグループの円（外枠は、パックの種類の色。拡大中は、広がる） */}
               {allGroups.map((g) => {
                 const on = g.packCode === focusCode
+                const emph = emphPacks.has(g.packCode)
                 const gn = groupNow(g.packCode)
-                const color = typeColorOf(g.packCode)
-                return <circle key={g.packCode} cx={gn.cx} cy={gn.cy} r={gn.r} fill={color} fillOpacity={on ? 0.14 : 0.07} stroke={color} strokeOpacity={on ? 1 : 0.9} strokeWidth={on ? 2.6 : 2} style={{ opacity: packOpacity(g.packCode), transition: 'opacity 0.2s' }} />
+                const color = typeColorOf(g.packCode) // 外枠は、パックの種類の色
+                return (
+                  <circle
+                    key={g.packCode}
+                    cx={gn.cx}
+                    cy={gn.cy}
+                    r={gn.r}
+                    fill={color}
+                    fillOpacity={on ? 0.14 : emph ? 0.22 : 0.07}
+                    stroke={color}
+                    strokeOpacity={on || emph ? 1 : 0.9}
+                    strokeWidth={on ? 2.6 : emph ? 3.2 : 2}
+                    data-role="pack-frame"
+                    style={{ opacity: packOpacity(g.packCode), transition: 'opacity 0.2s, transform 0.2s ease-out', cursor: 'pointer', transform: `scale(${emph ? EMPH_ZOOM : 1})`, transformBox: 'fill-box', transformOrigin: 'center' }}
+                    // 名札だけでなく、パックの範囲の外枠でも、カーソルを乗せる（タップ）と、拡大する
+                    onMouseEnter={() => enter({ kind: 'pack', code: g.packCode })}
+                    onMouseLeave={leave}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (suppressClick.current) return
+                      toggle({ kind: 'pack', code: g.packCode })
+                    }}
+                  />
+                )
               })}
 
               {/* 線（カードの下に描く） */}
