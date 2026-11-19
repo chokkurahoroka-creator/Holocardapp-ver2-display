@@ -1,5 +1,6 @@
 // このファイルは、管理画面（horoka-admin）から、同期したコピーです。直接は、直さないでください（node scripts/sync-versus.mjs で、上書きされます）。直すときは、管理画面側のファイルを直して、同期してください。
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useSetsAdmin, setLabel } from '../hooks/useSetsAdmin'
 import { loadCardPackInfo, PACK_TYPES, type CardPackInfo, type PackType } from '../utils/packFamilies'
 import { layoutPackGraph, CARD_R, HUB_R } from '../utils/packGraphLayout'
@@ -21,7 +22,9 @@ import type { DeckRecipeX } from '../hooks/useDeckCases'
 //     名札は約2.5倍、そのパックに収録されている（関係する）カードのアイコンは2倍。グループのカードは、見やすいよう、ゆったりと広がり直す。
 //     拡大した円が、周りのパックを隠すときは、周りのパックを、円周に沿って、見える位置へずらす。大きな円からはみ出す場合は、はみ出さない位置まで、中心へ寄る。
 //     そのパックで再録のカードは、縁が青になる
-//   ・図は、ホイールで拡大・縮小、ドラッグで移動、（スマホは）ピンチで拡大・縮小ができる
+//   ・パックにカーソルを乗せている間は、いちばん外の円（パックを並べた輪）が外へ広がり、内側の表示領域が広くなる（外側は、見切れてもよい）
+//   ・強調するパック（関係カードがいるほかのパック）は、カードを名札から離して並べ直し、名札とカードが、重ならないようにする。関係ラインが薄くなったら（カードにカーソルを移したら）、そのパックの強調も、外す
+//   ・図は、ホイールで拡大・縮小、ドラッグで移動、（スマホは）ピンチで拡大・縮小ができる。ボタンで、図と収録情報を、全画面にできる
 //   ・「収録情報」は、図の右側（狭い画面では、下）の、別のパネルに出す
 
 export const PACK_LINK_COLOR: Record<PackType, string> = { 新規: '#ff4d4d', 再録: '#4da3ff', パラレル: '#ffd23f' }
@@ -40,11 +43,14 @@ const LABEL_FS = 11 // 種類の名前の文字の大きさ
 const TYPE_COLORS = ['#4ce0e6', '#c58bff', '#ffb454', '#7bdc8a', '#ff8fb0', '#9fb4ff'] // パックの種類ごとの色（弧・外枠）
 
 // 拡大したときの、グループの中のカードの並べ方（ゆったり）
-const EXP_HUB_GAP = 30 // 名札とカードの、すき間
+const EXP_HUB_GAP = 46 // 名札と、いちばん内側（一層め）のカードの、すき間
+const EXP_ARC_GAP_FIRST = 70 // 一層めの、カード同士のすき間（広めにして、一層めを、分散させる）
 const EXP_ARC_GAP = 26 // 同じ輪の中の、カード同士のすき間
 const EXP_RING_GAP = 30 // 輪と輪の、すき間
 const EXP_PAD = 16 // グループの円の、内側の余白
 const NEIGHBOR_GAP = 10 // ずらした周りのパックと、拡大した円との、すき間
+const EMPH_PUSH = 36 // 強調するパックで、カードを、名札から離す距離（名札が1.2倍・関係カードが2倍になっても、重ならないように）
+const RING_GROW = 0.35 // パックにカーソルを乗せている間に、いちばん外の円（パックを並べた輪）が、外へ広がる割合
 
 const K_MIN = 0.5 // 図の、拡大・縮小の、最小・最大の倍率
 const K_MAX = 8
@@ -59,7 +65,7 @@ type Active = { kind: 'card'; id: number } | { kind: 'pack'; code: string } | nu
 export function layoutGroupExpanded(n: number): { positions: { x: number; y: number }[]; r: number } {
   const hubR = HUB_R * (1 + HUB_ZOOM)
   const cardR = CARD_R * (1 + CARD_ZOOM)
-  const arcStep = 2 * cardR + EXP_ARC_GAP
+  const arcStepOf = (ring: number) => 2 * cardR + (ring === 0 ? EXP_ARC_GAP_FIRST : EXP_ARC_GAP)
   const ringStep = 2 * cardR + EXP_RING_GAP
   if (n <= 0) return { positions: [], r: hubR + EXP_PAD }
   const dists: number[] = []
@@ -67,7 +73,7 @@ export function layoutGroupExpanded(n: number): { positions: { x: number; y: num
   let total = 0
   while (total < n) {
     const dist = hubR + cardR + EXP_HUB_GAP + dists.length * ringStep
-    const cap = Math.max(1, Math.floor((2 * Math.PI * dist) / arcStep))
+    const cap = Math.max(1, Math.floor((2 * Math.PI * dist) / arcStepOf(dists.length)))
     dists.push(dist)
     caps.push(cap)
     total += cap
@@ -132,6 +138,33 @@ export function shiftNeighborAngles(p: { ringR: number; angles: number[]; radii:
   if (lo <= first + 1e-9 && hi >= last - 1e-9) return out // もう十分離れている
   for (let j = 1; j < n; j++) out[idxOf(j)] = th + lo + (((phi[j - 1] ?? 0) - first) / span) * (hi - lo)
   return out
+}
+
+// 数値（0〜1など）を、目標に向けて、なめらかに変える
+function useTween(target: number, ms: number): number {
+  const [v, setV] = useState(target)
+  const cur = useRef(target)
+  useEffect(() => {
+    const reduce = typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    if (reduce) {
+      cur.current = target
+      setV(target)
+      return
+    }
+    const from = cur.current
+    let start: number | null = null
+    let raf = 0
+    const tick = (now: number) => {
+      if (start === null) start = now
+      const t = Math.min(1, Math.max(0, (now - start) / ms))
+      cur.current = from + (target - from) * (1 - Math.pow(1 - t, 3))
+      setV(cur.current)
+      if (t < 1) raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [target, ms])
+  return v
 }
 
 export type View = { k: number; tx: number; ty: number }
@@ -230,6 +263,32 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
   }
   const toggle = (a: NonNullable<Active>) => setSelected((cur) => (sameActive(cur, a) ? null : a))
 
+  // ---- 強調するパック・薄くするパックの決め方 ----
+  const packsOf = (info: CardPackInfo) => new Set(info.memberships.map((m) => m.packCode))
+  const activeInfo = active?.kind === 'card' ? infos.find((i) => i.card.id === active.id) : undefined
+  // 薄くしない（はっきり見せる）パック：拡大中のパック＋強調するパック
+  const brightPacks = new Set<string>()
+  // 強調するパック（明るく・1.2倍・カードを名札から離す）：見えている関係ラインが、つないでいるパック。
+  //   パックを選んでいるとき：そのパックに収録されている（関係する）カードがいる、ほかのパック
+  //   カードにカーソルのとき：そのカードの関係ラインだけが見えるので、そのカードが収録されているパックだけ（ほかのパックは、強調を外す）
+  const emphPacks = new Set<string>()
+  if (wantedFocus) brightPacks.add(wantedFocus)
+  if (activeInfo) {
+    packsOf(activeInfo).forEach((c) => emphPacks.add(c))
+  } else if (wantedFocus) {
+    infos.forEach((i) => {
+      if (i.memberships.some((m) => m.packCode === wantedFocus)) emphPacks.add(i.homePack)
+    })
+  }
+  if (wantedFocus) emphPacks.delete(wantedFocus)
+  emphPacks.forEach((c) => brightPacks.add(c))
+  // 強調の動き（0〜1）。外れるときは、直前に強調していたパックを使って、なめらかに戻す
+  const emphOn = emphPacks.size > 0
+  const emphLevel = useTween(emphOn ? 1 : 0, 220)
+  const lastEmph = useRef<Set<string>>(new Set())
+  if (emphOn) lastEmph.current = emphPacks
+  const emphShown = emphOn ? emphPacks : emphLevel > 0.001 ? lastEmph.current : emphPacks
+
   // ---- 配置：すべてのパックを、1つの円周に。パックの種類ごとに続けて（種類の順 → 発売順）並べる ----
   const { layout, ringR, ringAngles, expandedMap, cardPos, typeSpans, typeColors } = useMemo(() => {
     const packCodes = new Set<string>()
@@ -290,21 +349,22 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
   const allGroups = layout.groups
 
   // ---- 今の、グループの中心・半径（拡大中は、広がって、中心へ寄り、周りのパックが、円周に沿って、ずれる） ----
+  const ringScale = focusCode ? 1 + RING_GROW * expand : 1 // パックにカーソルを乗せている間、いちばん外の円（パックを並べた輪）が、外へ広がる
   const nowGroups = (() => {
     const m = new Map<string, { cx: number; cy: number; r: number }>()
-    allGroups.forEach((g) => m.set(g.packCode, { cx: g.cx, cy: g.cy, r: g.r }))
+    allGroups.forEach((g) => m.set(g.packCode, { cx: g.cx * ringScale, cy: g.cy * ringScale, r: g.r }))
     const fi = focusCode ? allGroups.findIndex((g) => g.packCode === focusCode) : -1
     const fg = fi >= 0 ? allGroups[fi] : undefined
     if (!focusCode || !fg || expand <= 0) return m
     const rNow = fg.r + ((expandedMap.get(focusCode)?.r ?? fg.r) - fg.r) * expand
-    const dist = Math.hypot(fg.cx, fg.cy)
-    const limit = Math.max(0, layout.outerR - 8 - rNow) // 大きな円の内側に収まる、中心からの最大距離
+    const dist = Math.hypot(fg.cx, fg.cy) * ringScale
+    const limit = Math.max(0, layout.outerR * ringScale - 8 - rNow) // 大きな円の内側に収まる、中心からの最大距離
     const k = dist > limit && dist > 0 ? limit / dist : 1
-    m.set(focusCode, { cx: fg.cx * k, cy: fg.cy * k, r: rNow })
+    m.set(focusCode, { cx: fg.cx * ringScale * k, cy: fg.cy * ringScale * k, r: rNow })
     if (allGroups.length >= 3 && ringR > 0) {
-      const next = shiftNeighborAngles({ ringR, angles: ringAngles, radii: allGroups.map((g) => g.r), focus: fi, focusK: k, focusRadius: rNow, gap: NEIGHBOR_GAP })
+      const next = shiftNeighborAngles({ ringR: ringR * ringScale, angles: ringAngles, radii: allGroups.map((g) => g.r), focus: fi, focusK: k, focusRadius: rNow, gap: NEIGHBOR_GAP })
       allGroups.forEach((g, i) => {
-        if (i !== fi) m.set(g.packCode, { cx: ringR * Math.cos(next[i] ?? 0), cy: ringR * Math.sin(next[i] ?? 0), r: g.r })
+        if (i !== fi) m.set(g.packCode, { cx: ringR * ringScale * Math.cos(next[i] ?? 0), cy: ringR * ringScale * Math.sin(next[i] ?? 0), r: g.r })
       })
     }
     return m
@@ -336,6 +396,15 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
         ry += (ex.y - ry) * expand
       }
     }
+    // 強調するパックは、カードを、名札から離す（名札が1.2倍・関係カードが2倍でも、重ならないように）
+    if (emphLevel > 0 && p.pack !== focusCode && emphShown.has(p.pack)) {
+      const len = Math.hypot(rx, ry)
+      if (len > 0) {
+        const k = (len + EMPH_PUSH * emphLevel) / len
+        rx *= k
+        ry *= k
+      }
+    }
     // 1枚目のカードが、パックの名札から見て、全体の円の中心の向きに来るよう、グループ全体を回す
     const rot = rotationOf(p.pack)
     const cos = Math.cos(rot)
@@ -359,21 +428,6 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
   })
 
   // ---- 薄くする・太くする ----
-  const packsOf = (info: CardPackInfo) => new Set(info.memberships.map((m) => m.packCode))
-  const activeInfo = active?.kind === 'card' ? infos.find((i) => i.card.id === active.id) : undefined
-  // 薄くしない（はっきり見せる）パック：拡大中のパック＋（カードにカーソルのときは）そのカードが収録されているパック
-  const brightPacks = new Set<string>()
-  // 強調するパック：拡大中のパックに収録されている（関係する）カードがいる、ほかのパック＋（カードにカーソルのときは）そのカードが収録されているパック。明るく、1.2倍にする
-  const emphPacks = new Set<string>()
-  if (wantedFocus) {
-    brightPacks.add(wantedFocus)
-    infos.forEach((i) => {
-      if (i.memberships.some((m) => m.packCode === wantedFocus)) emphPacks.add(i.homePack)
-    })
-  }
-  if (activeInfo) packsOf(activeInfo).forEach((c) => emphPacks.add(c))
-  if (wantedFocus) emphPacks.delete(wantedFocus)
-  emphPacks.forEach((c) => brightPacks.add(c))
   const dimming = brightPacks.size > 0 // パックを選んでいる／カードにカーソルがあるとき、ほかを薄くする
   const packOpacity = (code: string) => (!dimming || brightPacks.has(code) ? 1 : DIM_OPACITY)
   const cardOpacity = (info: CardPackInfo) => {
@@ -412,6 +466,40 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
 
   // ---- 拡大・縮小・移動（ホイール／ドラッグ／ピンチ／ボタン） ----
   const [view, setView] = useState<View>({ k: 1, tx: 0, ty: 0 })
+  // 全画面：図と収録情報を、画面いっぱいに出す（ブラウザの全画面にできるときは、そうする。できない環境でも、画面を覆う表示になる）
+  const [full, setFull] = useState(false)
+  const wrapRef = useRef<HTMLDivElement | null>(null)
+  const nativeFull = useRef(false)
+  useEffect(() => {
+    if (full) {
+      const el = wrapRef.current
+      try {
+        void el?.requestFullscreen?.().then(() => (nativeFull.current = true)).catch(() => undefined)
+      } catch {
+        // 全画面にできない環境：画面を覆う表示のまま
+      }
+    } else if (typeof document !== 'undefined' && document.fullscreenElement) {
+      nativeFull.current = false
+      void document.exitFullscreen?.().catch(() => undefined)
+    }
+  }, [full])
+  useEffect(() => {
+    const onChange = () => {
+      if (!document.fullscreenElement && nativeFull.current) {
+        nativeFull.current = false
+        setFull(false)
+      }
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFull(false)
+    }
+    document.addEventListener('fullscreenchange', onChange)
+    if (full) window.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('fullscreenchange', onChange)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [full])
   const svgRef = useRef<SVGSVGElement | null>(null)
   const geo = useRef({ minX, minY, vbW, vbH })
   geo.current = { minX, minY, vbW, vbH }
@@ -444,7 +532,7 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
     svg.addEventListener('wheel', onWheel, { passive: false })
     return () => svg.removeEventListener('wheel', onWheel)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [full])
   const pointers = useRef(new Map<number, { x: number; y: number }>())
   const gesture = useRef<{ view: View; start: { x: number; y: number }; dist: number; moved: boolean }>({ view, start: { x: 0, y: 0 }, dist: 0, moved: false })
   const suppressClick = useRef(false)
@@ -513,7 +601,7 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
     const gn = groupNow(g.packCode)
     const hubClip = `pg-hub-${allGroups.indexOf(g)}-${g.packCode.replace(/[^0-9A-Za-z_-]/g, '_')}`
     const isFocus = g.packCode === focusCode
-    const emph = emphPacks.has(g.packCode)
+    const emph = emphShown.has(g.packCode) && !isFocus
     return (
       <g
         key={`hub-${g.packCode}`}
@@ -539,12 +627,12 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
         }}
       >
         <title>{`${label}（${g.packCode}／${packType(g.packCode)}）`}</title>
-        <g style={{ transform: `scale(${emph ? EMPH_ZOOM : 1})`, transformBox: 'view-box', transformOrigin: '0 0', transition: 'transform 0.2s ease-out' }}>
+        <g style={{ transform: `scale(${emph ? 1 + (EMPH_ZOOM - 1) * emphLevel : 1})`, transformBox: 'view-box', transformOrigin: '0 0' }}>
         <clipPath id={hubClip}>
           <circle r={HUB_R - 1} />
         </clipPath>
         {/* 強調するパックは、白い輪で、明るくする */}
-        {emph && <circle r={HUB_R + 4} fill="none" stroke="#ffffff" strokeWidth={2.4 / hs} opacity={0.85} />}
+        {emph && <circle r={HUB_R + 4} fill="none" stroke="#ffffff" strokeWidth={2.4 / hs} opacity={0.85 * emphLevel} />}
         <circle r={HUB_R} fill="#0b1e26" stroke={typeColorOf(g.packCode)} strokeWidth={((active?.kind === 'pack' && active.code === g.packCode) || emph ? 3 : 2) / hs} />
         {img && (
           <>
@@ -559,8 +647,8 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
           {label.length > 8 ? `${label.slice(0, 7)}…` : label}
         </text>
         {/* 拡大・強調したときは、パック名の全体を、名札の下に出す */}
-        {((isFocus && expand > 0.5) || emph) && (
-          <text textAnchor="middle" y={HUB_R + 10} fontSize={8} fontWeight={700} fill="#ffffff" stroke="#071820" strokeWidth={3} paintOrder="stroke" opacity={isFocus ? Math.min(1, (expand - 0.5) * 2) : 1}>
+        {((isFocus && expand > 0.5) || (emph && emphLevel > 0.4)) && (
+          <text textAnchor="middle" y={HUB_R + 10} fontSize={8} fontWeight={700} fill="#ffffff" stroke="#071820" strokeWidth={3} paintOrder="stroke" opacity={isFocus ? Math.min(1, (expand - 0.5) * 2) : Math.min(1, (emphLevel - 0.4) * 2)}>
             {label}
           </text>
         )}
@@ -650,7 +738,7 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
     return per
   }
   const infoPanel = (
-    <aside className="flex max-h-[60vh] min-h-0 flex-col rounded border border-[#2a4a52] bg-[#071820]/70 text-xs text-[#d7eef2] lg:max-h-[74vh]" aria-live="polite" aria-label="収録情報">
+    <aside className={`flex min-h-0 flex-col rounded border border-[#2a4a52] bg-[#071820]/70 text-xs text-[#d7eef2] ${full ? 'h-full' : 'max-h-[60vh] lg:max-h-[74vh]'}`} aria-live="polite" aria-label="収録情報">
       <div className="flex items-center justify-between border-b border-[#2a4a52] px-3 py-2">
         <h4 className="hud-font text-sm font-bold text-white">収録情報</h4>
         {active && (
@@ -781,8 +869,8 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
     </aside>
   )
 
-  return (
-    <div>
+  const content = (
+    <div ref={wrapRef} data-role={full ? 'pack-graph-full' : undefined} className={full ? 'fixed inset-0 z-[130] flex flex-col overflow-auto bg-[#061217] p-3' : undefined}>
       <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[#d7eef2]">
         {PACK_TYPES.map((t) => (
           <span key={t} className="flex items-center gap-1.5">
@@ -793,12 +881,12 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
         <span className="text-[10px] text-[#9fc3ca]">（カードの縁の色＝デッキに入っているカードの区分。カードにカーソルを乗せる／タップ：1.5倍。パックの名札・外枠にカーソルを乗せる／タップ：そのパックが拡大し、関係カードがいるほかのパックは明るく1.2倍になり、それ以外が薄くなり、そのパックで再録のカードの縁が、青になります）</span>
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="relative min-w-0 overflow-hidden rounded border border-[#2a4a52] bg-[#061217]">
+      <div className={full ? 'grid min-h-0 flex-1 grid-rows-[minmax(0,3fr)_minmax(0,2fr)] gap-3 lg:grid-cols-[minmax(0,1fr)_360px] lg:grid-rows-1' : 'grid gap-3 lg:grid-cols-[minmax(0,1fr)_320px]'}>
+        <div className={`relative min-w-0 overflow-hidden rounded border border-[#2a4a52] bg-[#061217] ${full ? 'min-h-0' : ''}`}>
           <svg
             ref={svgRef}
             viewBox={`${minX} ${minY} ${vbW} ${vbH}`}
-            className="block h-[60vh] w-full touch-none select-none lg:h-[74vh]"
+            className={`block w-full touch-none select-none ${full ? 'h-full' : 'h-[60vh] lg:h-[74vh]'}`}
             style={{ cursor: view.k > 1 ? 'grab' : 'default' }}
             role="img"
             aria-label="デッキのカードが収録されているパックの図"
@@ -811,8 +899,9 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
             }}
           >
             <g data-role="viewport" transform={`translate(${view.tx} ${view.ty}) scale(${view.k})`}>
-              {/* いちばん大きな円 */}
-              <circle r={R - 1} fill="rgba(76, 224, 230, 0.03)" stroke="#2a4a52" strokeWidth={1} />
+              <g data-role="outer-ring" transform={`scale(${ringScale})`}>
+              {/* いちばん大きな円（パックにカーソルを乗せている間は、外へ広がる） */}
+              <circle r={R - 1} fill="rgba(76, 224, 230, 0.03)" stroke="#2a4a52" strokeWidth={1 / ringScale} />
 
               {/* パックの種類ごとの範囲：円周の内側の弧と、外側の名前（円弧に沿って書く）。種類が2つ以上のときだけ */}
               {typeLabels.map((t) => {
@@ -830,13 +919,15 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
                   </g>
                 )
               })}
+              </g>
 
               {/* パックごとのグループの円（外枠は、パックの種類の色。拡大中は、広がる） */}
               {allGroups.map((g) => {
                 const on = g.packCode === focusCode
-                const emph = emphPacks.has(g.packCode)
+                const emph = emphShown.has(g.packCode) && !on
                 const gn = groupNow(g.packCode)
                 const color = typeColorOf(g.packCode) // 外枠は、パックの種類の色
+                const frameScale = emph ? Math.max(1 + (EMPH_ZOOM - 1) * emphLevel, (g.r + (EMPH_PUSH + CARD_R * CARD_ZOOM) * emphLevel) / g.r) : 1 // 1.2倍以上（離した、2倍の大きさのカードが、枠に収まる大きさ）
                 return (
                   <circle
                     key={g.packCode}
@@ -849,7 +940,7 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
                     strokeOpacity={on || emph ? 1 : 0.9}
                     strokeWidth={on ? 2.6 : emph ? 3.2 : 2}
                     data-role="pack-frame"
-                    style={{ opacity: packOpacity(g.packCode), transition: 'opacity 0.2s, transform 0.2s ease-out', cursor: 'pointer', transform: `scale(${emph ? EMPH_ZOOM : 1})`, transformBox: 'fill-box', transformOrigin: 'center' }}
+                    style={{ opacity: packOpacity(g.packCode), transition: 'opacity 0.2s', cursor: 'pointer', transform: `scale(${frameScale})`, transformBox: 'fill-box', transformOrigin: 'center' }}
                     // 名札だけでなく、パックの範囲の外枠でも、カーソルを乗せる（タップ）と、拡大する
                     onMouseEnter={() => enter({ kind: 'pack', code: g.packCode })}
                     onMouseLeave={leave}
@@ -877,6 +968,11 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
 
           {/* 拡大・縮小のボタンと、使い方 */}
           <div className="absolute right-2 top-2 flex flex-col gap-1">
+            <button type="button" className="btn-secondary !h-8 !w-8 !p-0" onClick={() => setFull((f) => !f)} aria-label={full ? '全画面を終了' : '全画面表示'} title={full ? '全画面を終了（Esc）' : '図と収録情報を、全画面で表示'}>
+              <svg viewBox="0 0 16 16" className="mx-auto h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                {full ? <path d="M6 2v4H2 M10 2v4h4 M14 10h-4v4 M2 10h4v4" /> : <path d="M2 6V2h4 M10 2h4v4 M14 10v4h-4 M6 14H2v-4" />}
+              </svg>
+            </button>
             <button type="button" className="btn-secondary !h-8 !w-8 !p-0 text-base" onClick={() => zoomBy(1.3)} aria-label="拡大">
               ＋
             </button>
@@ -887,13 +983,15 @@ export function PackGraphView({ infos, counts, packLabel, packRank, packType, pa
               1:1
             </button>
           </div>
-          <p className="pointer-events-none absolute bottom-1.5 left-2 text-[10px] text-[#6f9aa3]">ホイールで拡大・縮小 ／ ドラッグで移動 ／ スマホは、ピンチ</p>
+          <p className="pointer-events-none absolute bottom-1.5 left-2 text-[10px] text-[#6f9aa3]">ホイールで拡大・縮小 ／ ドラッグで移動 ／ スマホは、ピンチ{full ? ' ／ Escで全画面を終了' : ''}</p>
         </div>
 
         {infoPanel}
       </div>
     </div>
   )
+  // 全画面のときは、画面全体を覆うよう、ページの直下に出す（デッキ詳細の枠の外へ）
+  return full && typeof document !== 'undefined' ? createPortal(content, document.body) : content
 }
 
 // データを取って、図を出す（エールを、図に含めるかを選べる。初めは、推しホロメンとメインデッキだけ）
