@@ -13,11 +13,17 @@
 //   （仕様が変わったときは、ここと、src/versus-app/utils/decklog.ts の読み取りを直す）
 //
 // 必要な設定：wrangler.jsonc の vars に、SUPABASE_URL と SUPABASE_ANON_KEY
+//
+// もう1つ：GET /api/image?url=<画像のURL>
+//   カード画像のダウンロード用。ブラウザから、R2の画像を直接取得できない（CORS・キャッシュの影響）ときに、サーバーが代わりに取得して返す。
+//   取得できるのは、画像（image/*）だけ。取得先は、*.r2.dev と、vars の PUBLIC_R2_URL（独自ドメインを使うとき）・IMAGE_HOSTS（ほかのホストを、カンマ区切りで）に限る
 
 type Env = {
     ASSETS: { fetch: (request: Request) => Promise<Response> }
     SUPABASE_URL?: string
     SUPABASE_ANON_KEY?: string
+    PUBLIC_R2_URL?: string // R2の公開URL（例：https://images.example.com）。*.r2.dev 以外のドメインを使うときに、設定する
+    IMAGE_HOSTS?: string // 画像を取得してよいホストを、追加する（カンマ区切り）
   }
   
   // 日本語版を先に、だめなら、英語版のデッキログで探す
@@ -86,9 +92,59 @@ type Env = {
     return jsonError(lastStatus === 404 || lastStatus === 0 ? 'このデッキコードのデッキが見つかりませんでした（コードの間違い・非公開のデッキの可能性があります）' : `デッキログから取得できませんでした（HTTP ${lastStatus}）[${trail.join(' / ')}]`, 502)
   }
   
+  const MAX_IMAGE_BYTES = 20 * 1024 * 1024 // 画像の大きさの上限（20MB）
+  
+  // 取得してよいホストか：*.r2.dev ／ PUBLIC_R2_URL のホスト ／ IMAGE_HOSTS に書いたホスト
+  function isAllowedImageHost(host: string, env: Env): boolean {
+    if (host.endsWith('.r2.dev')) return true
+    const extra = (env.IMAGE_HOSTS ?? '')
+      .split(',')
+      .map((h) => h.trim().toLowerCase())
+      .filter(Boolean)
+    if (extra.includes(host)) return true
+    try {
+      return !!env.PUBLIC_R2_URL && new URL(env.PUBLIC_R2_URL).host.toLowerCase() === host
+    } catch {
+      return false
+    }
+  }
+  
+  async function handleImage(request: Request, env: Env): Promise<Response> {
+    const raw = new URL(request.url).searchParams.get('url') ?? ''
+    let target: URL
+    try {
+      target = new URL(raw)
+    } catch {
+      return jsonError('画像のURLが正しくありません', 400)
+    }
+    if (target.protocol !== 'https:') return jsonError('https の画像だけ、取得できます', 400)
+    if (!isAllowedImageHost(target.host.toLowerCase(), env)) return jsonError(`このホストの画像は、取得できません（${target.host}）。独自ドメインのときは、wrangler.jsonc の vars に PUBLIC_R2_URL を設定してください`, 403)
+  
+    let res: Response
+    try {
+      res = await fetch(target.toString(), { cf: { cacheTtl: 86400, cacheEverything: true } } as RequestInit)
+    } catch {
+      return jsonError('画像の取得先に、接続できませんでした', 502)
+    }
+    if (!res.ok) return jsonError(`画像を取得できませんでした（取得先の応答: HTTP ${res.status}）`, 502)
+    const type = res.headers.get('Content-Type') ?? ''
+    if (!type.startsWith('image/')) return jsonError('画像ではないため、取得できません', 415)
+    if (Number(res.headers.get('Content-Length') ?? 0) > MAX_IMAGE_BYTES) return jsonError('画像が大きすぎます', 413)
+    return new Response(res.body, { headers: { 'Content-Type': type, 'Cache-Control': 'public, max-age=86400' } })
+  }
+  
   export default {
     async fetch(request: Request, env: Env): Promise<Response> {
       const { pathname } = new URL(request.url)
+      if (pathname === '/api/image') {
+        if (request.method !== 'GET') return jsonError('GET だけ使えます', 405)
+        try {
+          return await handleImage(request, env)
+        } catch (err) {
+          console.error('image error', err)
+          return jsonError('サーバー内部エラー: ' + (err instanceof Error ? err.message : String(err)), 500)
+        }
+      }
       // wrangler.jsonc の run_worker_first で、「/api/*」だけが、ここに来る。それ以外は、静的ファイルが、そのまま配信される
       if (pathname === '/api/decklog') {
         if (request.method !== 'GET') return jsonError('GET だけ使えます', 405)
