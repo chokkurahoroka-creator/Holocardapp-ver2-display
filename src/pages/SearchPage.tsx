@@ -15,9 +15,12 @@ import { CardSizeControl, CARD_SIZE_DEFAULT } from '../components/CardSizeContro
 import { ControlsBar, ControlGroup } from '../components/ControlsBar'
 import { SearchBox } from '../components/SearchBox'
 import { FilterButton } from '../components/FilterButton'
+import { downloadCardsAsZip } from '../lib/download'
+import { logDownloadEvents } from '../lib/logEvent'
 import type { Card } from '../types/card'
 
-const EMPTY_SELECTION = new Set<number>()
+// 一括ダウンロードで、一度に取得する枚数が多いときの確認の目安
+const BULK_CONFIRM_COUNT = 200
 const CARD_SIZE_STORAGE_KEY = 'horoka-display:cardSize'
 
 // パックセットごと（パックセットに入っていないパックは、そのパックごと）に区切ってまとめる。
@@ -99,13 +102,72 @@ export function SearchPage() {
   const handleNext = () => setNavIndex((i) => (i + 1) % navCards.length)
   const currentCard = navIndex !== -1 ? navCards[navIndex] ?? null : null
 
+  // ----- 一括選択ダウンロード（新カード一覧と同じ） -----
+  // 検索語を変えても、選んだカードは、そのまま残る（見えていないカードも、ダウンロードに含む）
+  const [selectionMode, setSelectionMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [zipStatus, setZipStatus] = useState('')
+  const [downloading, setDownloading] = useState(false)
+
+  const handleToggleSelect = (card: Card) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(card.id)) next.delete(card.id)
+      else next.add(card.id)
+      return next
+    })
+  }
+  const handleExitSelectionMode = () => {
+    setSelectionMode(false)
+    setSelectedIds(new Set())
+    setZipStatus('')
+  }
+  // 今、一覧に出ているカードを、すべて選ぶ（検索結果をまとめて、ダウンロードするときに使う）
+  const handleSelectShown = () => setSelectedIds((prev) => new Set([...prev, ...sorted.map((c) => c.id)]))
+  const handleBulkDownload = async () => {
+    const selectedCards = cards.filter((c) => selectedIds.has(c.id))
+    if (!selectedCards.length || downloading) return
+    if (selectedCards.length > BULK_CONFIRM_COUNT && !window.confirm(`${selectedCards.length}枚の画像を、まとめて取得します。時間がかかり、端末への負荷も大きくなります。続けますか？`)) return
+    setDownloading(true)
+    try {
+      await downloadCardsAsZip(selectedCards, (done, total) => {
+        setZipStatus(`画像を取得中... (${done}/${total})`)
+      })
+      logDownloadEvents(selectedCards)
+      setZipStatus(`${selectedCards.length}枚をダウンロードしました`)
+    } catch (err) {
+      setZipStatus('ダウンロードに失敗しました: ' + (err instanceof Error ? err.message : String(err)))
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   return (
     // カードの表示範囲は、画面の幅に対してPCは80%・スマホは90%にして、中央に寄せる
-    <div style={{ width: isMobile ? '90%' : '80%', margin: '0 auto', padding: 'clamp(10px, 4vw, 20px)' }}>
+    <div style={{ width: isMobile ? '90%' : '80%', margin: '0 auto', padding: 'clamp(10px, 4vw, 20px)', paddingBottom: selectionMode ? 90 : 'clamp(10px, 4vw, 20px)' }}>
       <SiteNav />
 
       {/* 1行目: 検索バー（このページには開閉するパネルが無いため、メニューのタブは出さない）。2行目: カード（並び替え・昇降順・フィルター）とパック（並び順・区切り）のまとまり */}
-      <ControlsBar search={<SearchBox value={searchQuery} onChange={setSearchQuery} placeholder="カード名・タグ・キーワード（全弾対象・スペースで複数）" />}>
+      <ControlsBar
+        search={
+          <>
+            <SearchBox value={searchQuery} onChange={setSearchQuery} placeholder="カード名・タグ・キーワード（全弾対象・スペースで複数）" />
+            {/* 一括ダウンロード：押すと、選択モードになり、カードを選んで、ZIPでまとめてダウンロードできる */}
+            <button
+              type="button"
+              className={selectionMode ? 'btn-primary' : 'btn-secondary'}
+              onClick={() => (selectionMode ? handleExitSelectionMode() : setSelectionMode(true))}
+              aria-pressed={selectionMode}
+              aria-label={selectionMode ? '選択モードを終了' : '選択してダウンロード'}
+              title={selectionMode ? '選択モードを終了' : 'カードを選んで、画像をまとめてダウンロード（ZIP）'}
+              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 40, flexShrink: 0, whiteSpace: 'nowrap', ...(isMobile ? { padding: '0 10px' } : null) }}
+            >
+              <DownloadIcon />
+              {!isMobile && (selectionMode ? '選択モードを終了' : '選択してダウンロード')}
+            </button>
+          </>
+        }
+      >
         <ControlGroup kind="card">
           <select className="field" value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
             <option value="overall">カード番号順</option>
@@ -159,9 +221,9 @@ export function SearchPage() {
           onCardClick={handleCardClick}
           isFav={() => false}
           onToggleFav={() => {}}
-          selectionMode={false}
-          selectedIds={EMPTY_SELECTION}
-          onToggleSelect={() => {}}
+          selectionMode={selectionMode}
+          selectedIds={selectedIds}
+          onToggleSelect={handleToggleSelect}
           tileScale={cardScale}
           sortKey={sortKey}
           groupWithSet
@@ -192,15 +254,50 @@ export function SearchPage() {
             onCardClick={handleCardClick}
             isFav={() => false}
             onToggleFav={() => {}}
-            selectionMode={false}
-            selectedIds={EMPTY_SELECTION}
-            onToggleSelect={() => {}}
+            selectionMode={selectionMode}
+            selectedIds={selectedIds}
+            onToggleSelect={handleToggleSelect}
             tileScale={cardScale}
             sortKey={sortKey}
           />
         </div>
       ))}
         </>
+      )}
+
+      {selectionMode && (
+        <div
+          style={{
+            position: 'fixed',
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'var(--hud-panel)',
+            borderTop: '1px solid var(--hud-cyan)',
+            padding: '10px clamp(10px, 4vw, 20px)',
+            paddingBottom: 'calc(10px + env(safe-area-inset-bottom, 0px))', // iPhoneのホームバーに重ならないように
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            flexWrap: 'wrap',
+            zIndex: 900,
+            color: 'var(--hud-ink)',
+          }}
+        >
+          <span className="hud-mono" style={{ fontSize: 13, color: 'var(--hud-cyan)' }}>
+            {selectedIds.size} SELECTED
+          </span>
+          <button className="btn-primary" onClick={handleBulkDownload} disabled={!selectedIds.size || downloading}>
+            {downloading ? '取得中…' : '選択した画像をダウンロード（ZIP）'}
+          </button>
+          <button className="btn-secondary" onClick={handleSelectShown} disabled={downloading || !sorted.length}>
+            表示中の{sorted.length}枚を選択
+          </button>
+          <button className="btn-secondary" onClick={() => setSelectedIds(new Set())} disabled={downloading || !selectedIds.size}>
+            選択を解除
+          </button>
+          {zipStatus && <span style={{ fontSize: 12, color: 'var(--hud-ink-dim)' }}>{zipStatus}</span>}
+        </div>
       )}
 
       <CardModal card={currentCard} onClose={handleClose} onPrev={handlePrev} onNext={handleNext} hasNav={navCards.length > 1} onSelectCard={() => {}} />
@@ -220,6 +317,16 @@ function PackMergeIcon() {
       <rect x="9.25" y="1.75" width="5" height="5" rx="1" />
       <rect x="1.75" y="9.25" width="5" height="5" rx="1" />
       <rect x="9.25" y="9.25" width="5" height="5" rx="1" />
+    </svg>
+  )
+}
+
+// 一括ダウンロードボタンのアイコン（下向きの矢印と、受け皿）
+function DownloadIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M8 2v8M4.75 7.25 8 10.5l3.25-3.25" />
+      <path d="M2.5 12.5v1h11v-1" />
     </svg>
   )
 }
