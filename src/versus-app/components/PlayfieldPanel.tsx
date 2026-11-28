@@ -91,11 +91,11 @@ import {
   type ZoneId,
   type ZoneKey,
 } from '../utils/playfield'
-import { DAMAGE_STRIP, PlayfieldBoard, type BoardProps, type OshiSkill, dropAllowed, type DragItem, type DropPos, type PickState, type PlayDrag, type PlayFx, type PlayFxInput } from './PlayfieldBoard'
+import { PlayfieldBoard, type BoardProps, type ChipKind, type OshiSkill, dropAllowed, type DragItem, type DropPos, type PickState, type PlayDrag, type PlayFx, type PlayFxInput } from './PlayfieldBoard'
 import { CardPreview } from './CardPreview'
 import { CardEffects } from './CardEffects'
 import { DeckMenu, type DeckMenuAction } from './DeckMenu'
-import { DamageCounterStrip } from './DamageCounterStrip'
+import { CHIP_INFO, ChipDialog, DamageCounterStrip, type ChipSubmit } from './DamageCounterStrip'
 import { PlayLogPanel } from './PlayLogPanel'
 import { VictoryModal } from './VictoryModal'
 import { TurnChangeBanner } from './TurnChangeBanner'
@@ -107,6 +107,7 @@ import { SupportCastOverlay, type SupportCast } from './SupportCastOverlay'
 import { parseAttribute } from '../utils/attribute'
 import type { ArtRow } from '../types/artsSkills'
 import { winnerByLife } from '../utils/victory'
+import { playSound, soundsForLog } from '../utils/sound'
 import { PLAY_LOG_LIMIT, cardLabel, diffPlayLog, diffSkillLog, diffTurnLog, logThumb, type PlayLogDraft, type PlayLogEntry } from '../utils/playLog'
 
 const STORAGE_KEY = 'horoka-admin:playfield:v1'
@@ -501,7 +502,10 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
   useEffect(() => {
     const ev = versusRef.current?.lastEvent
     if (!ev) return
-    if (ev.kind === 'dice') setMessage(`相手のサイコロ：${ev.n}`)
+    if (ev.kind === 'dice') {
+      setMessage(`相手のサイコロ：${ev.n}`)
+      pushLog([{ side: 'opp', kind: 'dice', text: `サイコロの目：${ev.n}` }]) // 相手のサイコロも、プレイログに残す
+    }
     else if (ev.kind === 'janken') receiveJanken(ev.hand)
     else pushFx(ev.fx, false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -553,6 +557,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
   // ms：演出を、盤面に出しておく時間。ブルームの演出は、相手の画面へは送らない（それぞれの画面で、盤面の変化から出す）
   const pushFx = (fx: PlayFxInput, emit = true, ms = 1300) => {
     if (emit && fx.kind !== 'bloom' && fx.kind !== 'hit') versus?.onEmit({ kind: 'fx', fx })
+    playSound(fx.kind === 'shuffle' ? 'shuffle' : fx.kind === 'down' ? 'down' : fx.kind === 'fly' ? 'fly' : fx.kind === 'bloom' ? 'bloom' : fx.kind === 'attack' ? 'attack' : 'hit') // 効果音（相手が起こした演出も、同じように鳴る）
     const id = ++fxSeq.current
     setFxList((l) => [...l, { ...fx, id }])
     window.setTimeout(() => setFxList((l) => l.filter((f) => f.id !== id)), ms)
@@ -583,7 +588,11 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
     }
     const name = unitParts(base[zone]).top?.card.card_name ?? ''
     if (delta < 0) {
-      setState(addDamage(base, zone, delta))
+      const before = unitDamage(base[zone])
+      const next = addDamage(base, zone, delta)
+      setState(next)
+      const healed = before - unitDamage(next[zone])
+      setMessage(`${pre}${name}のダメージを${healed}回復しました（いまのダメージ ${unitDamage(next[zone])}）`)
       return
     }
     const r = applyDamage(base, zone, delta, hpOf)
@@ -646,22 +655,10 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
   // デッキの下半分にドロップすると、デッキの一番下に入る（上半分は、デッキトップ）
   const performDrop = (d: PlayDrag, zone: ZoneId, index?: number, pos?: DropPos) => {
     if (d === null || !dropAllowed(d, zone, state)) return
-    if (d.kind === 'damage' || d.kind === 'power' || d.kind === 'hp') {
-      const kind = d.kind
-      const remove = (s: PlayState, z: ZoneId) => (kind === 'damage' ? addDamage(s, z, -d.amount) : kind === 'power' ? addPower(s, z, -d.amount) : addHpUp(s, z, -d.amount))
-      if ((zone as string) === DAMAGE_STRIP) {
-        // カードに乗っているカウンターを、置き場へ戻す
-        if (d.from) {
-          setState(remove(state, d.from))
-          setMessage(`${kind === 'damage' ? 'ダメージ' : kind === 'power' ? 'パワーアップ' : '最大HPアップ'}カウンター${d.amount}を外しました`)
-        }
-      } else if (d.from !== zone) {
-        // 置き場から（または別のカードから）、カードに重ねる
-        const base = d.from ? remove(state, d.from) : state
-        if (kind === 'damage') damageUnit(zone, d.amount, base)
-        else if (kind === 'power') powerUnit(zone, d.amount, base)
-        else hpUpUnit(zone, d.amount, base)
-      }
+    if (d.kind === 'chip') {
+      // チップを、ホロメンにドロップした：数値の入力（クリアなら、項目の選択）を開く
+      if (guardYell()) return
+      openChipInput(zone, d.chip)
       return
     }
     // ログは、2人でひとつの枠。置いたカードは、持ち主（動かしたカードが、どちらの側のものか）のログに入る。
@@ -870,7 +867,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
 
   const holder = state.holder
   const holderGroups = useMemo(() => groupHolder(holder), [holder])
-  const holderOver = drag !== null && drag.kind !== 'damage' && drag.kind !== 'power' && drag.kind !== 'hp' && overZone === 'holder'
+  const holderOver = drag !== null && drag.kind !== 'chip' && overZone === 'holder'
   const viewerCards = viewer ? [...state[viewer]].reverse() : [] // 上のカードから順に
   const viewerParsed = viewer ? parseZone(viewer) : null
 
@@ -967,7 +964,8 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
   const canAct = (!versus || turn.active === 'me') && !prep
   const [attack, setAttack] = useState<{ art: ArtRow; extra: number; from: ZoneId } | null>(null) // 使うアーツを選んだあと、ダメージを与える相手を選んでいる最中
   const [artFrom, setArtFrom] = useState<ZoneId | null>(null) // アーツのメニューを出している、枠（センター・コラボ）
-  const [pendingChip, setPendingChip] = useState<{ kind: 'damage' | 'power' | 'hp'; amount: number } | null>(null) // 選んだカウンター（つけ先を、ステージで選ぶのを待っている）
+  const [pendingChip, setPendingChip] = useState<ChipKind | null>(null) // 選んだチップ（つけ先を、ステージで選ぶのを待っている）
+  const [chipInput, setChipInput] = useState<{ zone: ZoneId; chip: ChipKind } | null>(null) // つけ先を選んだあと：数値の入力（クリアは、項目の選択）を開いている
   const [resetMenu, setResetMenu] = useState<ZoneId | null>(null) // リセットステップ：メニューを出している枠
   const [resetMove, setResetMove] = useState<{ from: ZoneId; rest: boolean } | null>(null) // リセットステップ：バックの移動先を選んでいる最中
 
@@ -1011,6 +1009,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
       setPendingChip(null)
+      setChipInput(null)
       setAttack(null)
       setArtFrom(null)
       setResetMenu(null)
@@ -1052,17 +1051,64 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canAct, turn.phase, turn.active, state])
 
-  // カウンター（ダメージ・パワーアップ・最大HP）：タップ・クリックで選んで、つけ先を、ステージで選ぶ（もう一度タップすると、選ぶのをやめる）
-  const handleCounterTap = (kind: 'damage' | 'power' | 'hp', amount: number) => {
+  // チップ（ダメージ・回復・最大HPアップ・パワーアップ・クリア）：タップ・クリックで選んで、つけ先を、ステージで選ぶ（もう一度タップすると、選ぶのをやめる）。つけ先を選ぶと、数値の入力が開く
+  const handleCounterTap = (chip: ChipKind) => {
     if (guardYell()) return
-    if (pendingChip?.kind === kind && pendingChip.amount === amount) {
+    playSound('chip')
+    if (pendingChip === chip) {
       setPendingChip(null)
       return
     }
-    setPendingChip({ kind, amount })
+    setPendingChip(chip)
     setAttack(null)
     setArtFrom(null)
-    setMessage(`${kind === 'damage' ? 'ダメージ' : kind === 'power' ? 'パワーアップ' : '最大HP'}+${amount}：つけるホロメンを、ステージでクリック（タップ）してください`)
+    setMessage(`${CHIP_INFO[chip].name}：つけるホロメンを、ステージでクリック（タップ）してください`)
+  }
+  // つけ先が決まった：数値の入力を開く
+  const openChipInput = (zone: ZoneId, chip: ChipKind) => {
+    setPendingChip(null)
+    if (!isDamageableZone(stateRef.current, zone)) {
+      setMessage('チップをつけられるのは、センター・コラボ・バックステージのホロメンです')
+      return
+    }
+    setChipInput({ zone, chip })
+  }
+  // 数値を入力して、決定した
+  const submitChip = (v: ChipSubmit) => {
+    const ci = chipInput
+    setChipInput(null)
+    if (!ci) return
+    const { zone, chip } = ci
+    const base = stateRef.current
+    if (!isDamageableZone(base, zone)) return
+    if ('clear' in v) {
+      let next = base
+      const done: string[] = []
+      if (v.clear.damage && unitDamage(next[zone]) > 0) {
+        next = clearDamage(next, zone)
+        done.push('ダメージ')
+      }
+      if (v.clear.power && unitPower(next[zone]) > 0) {
+        next = clearPower(next, zone)
+        done.push('パワーアップ')
+      }
+      const name = unitParts(base[zone]).top?.card.card_name ?? ''
+      if (v.clear.hp && unitHpUp(next[zone]) > 0) {
+        done.push('最大HPアップ')
+        hpUpUnit(zone, -unitHpUp(next[zone]), next) // 最大HPが下がって、HPが0になったときは、アーカイブへ送る
+        setMessage(`${name}の${done.join('・')}をクリアしました`)
+        return
+      }
+      if (done.length === 0) return
+      setState(next)
+      setMessage(`${name}の${done.join('・')}をクリアしました`)
+      return
+    }
+    // ダウン（HPが0になる）したときは、アーツのダメージと同じく、ライフを1枚、手札の横のホルダーに移す
+    if (chip === 'damage') damageUnit(zone, v.amount, base, '', true)
+    else if (chip === 'heal') damageUnit(zone, -v.amount, base)
+    else if (chip === 'power') powerUnit(zone, v.amount, base)
+    else if (chip === 'hp') hpUpUnit(zone, v.amount, base)
   }
   const chipZones = useMemo(() => [...attackTargetZones(state, 'me'), ...attackTargetZones(state, 'opp')], [state])
 
@@ -1103,10 +1149,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
   const handlePickZone = (zone: ZoneId) => {
     // カウンターのつけ先
     if (pendingChip) {
-      setPendingChip(null)
-      if (pendingChip.kind === 'damage') damageUnit(zone, pendingChip.amount)
-      else if (pendingChip.kind === 'power') powerUnit(zone, pendingChip.amount)
-      else hpUpUnit(zone, pendingChip.amount)
+      openChipInput(zone, pendingChip)
       return
     }
     if (!canAct) return
@@ -1174,7 +1217,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
 
   // 枠を選ばせるモード（盤面の、光る枠）
   const pick = useMemo<PickState | null>(() => {
-    if (pendingChip) return chipZones.length > 0 ? { zones: chipZones, color: pendingChip.kind === 'damage' ? '#ef4444' : pendingChip.kind === 'power' ? '#f59e0b' : '#22c55e' } : null
+    if (pendingChip) return chipZones.length > 0 ? { zones: chipZones, color: CHIP_INFO[pendingChip].color } : null
     if (!canAct) return null
     if (turn.phase === 'reset') {
       if (resetMove) {
@@ -1203,7 +1246,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
   type PromptAction = { label: string; run: () => void }
   // 画面に出す案内は短く。くわしい説明は、hint（ホバーで見える）
   const stepPrompt: { text: string; hint?: string; actions?: PromptAction[] } | null = pendingChip
-    ? { text: `${pendingChip.kind === 'damage' ? 'ダメージ' : pendingChip.kind === 'power' ? 'パワーアップ' : '最大HP'}+${pendingChip.amount}：つけ先を選択`, hint: 'ステージのホロメンを、クリック（タップ）してつけます。Escで取り消し', actions: [{ label: 'やめる', run: () => setPendingChip(null) }] }
+    ? { text: `${CHIP_INFO[pendingChip].name}：つけ先を選択`, hint: 'ステージのホロメンを、クリック（タップ）してつけます。Escで取り消し', actions: [{ label: 'やめる', run: () => setPendingChip(null) }] }
     : !canAct
       ? null
       : turn.phase === 'reset'
@@ -1237,6 +1280,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
     fxPrev.current = state
     if (prev === state || countCards(prev) === 0) return
     const casts = detectSupportCasts(prev, state)
+    if (casts.length > 0) playSound('cast')
     if (casts.length > 0) setCastQueue((q) => [...q, ...casts.map((c) => ({ id: ++castSeq.current, card: c.card, who: versus ? (c.side === 'me' ? 'あなた' : '相手') : c.side === 'me' ? '自分' : '相手' }))])
     for (const b of detectBlooms(prev, state)) pushFx({ kind: 'bloom', zone: b.zone, stage: b.stage, label: b.label }, false, 1900)
     for (const h of detectHits(prev, state)) pushFx({ kind: 'hit', zone: h.zone, amount: h.amount }, false, 1100)
@@ -1358,6 +1402,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
     }
   }
   const receiveJanken = (wireHand: number) => {
+    playSound('janken')
     const hand = wireHand % 3
     if (prep?.step === 'janken' && Math.floor(wireHand / 3) < jankenRound.current) return // 前の回の手（遅れて届いた）は、無視する
     jankenTheirsRef.current = hand
@@ -1365,6 +1410,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
     else setMessage('相手が、じゃんけんの手を出しました。あなたも、手を出してください')
   }
   const pickJanken = (hand: number) => {
+    playSound('janken')
     jankenMineRef.current = hand
     setJankenMine(hand)
     if (versus) {
@@ -1438,6 +1484,8 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
   const logPrev = useRef({ state, turn, skillUsed })
   const pushLog = useCallback((drafts: PlayLogDraft[]) => {
     if (drafts.length === 0) return
+    // 効果音：ログの種類から決める（自分のサイコロは、振った瞬間に鳴らすので、ここでは鳴らさない）
+    for (const n of soundsForLog(drafts.filter((d) => !(d.kind === 'dice' && d.side === 'me')).map((d) => d.kind))) playSound(n)
     setPlayLog((l) => [...l, ...drafts.map((d): PlayLogEntry => ({ ...d, id: ++logSeq.current }))].slice(-PLAY_LOG_LIMIT))
   }, [])
   // 推しスキルの記録は、コスト（ホロパワーを、1枚ずつアーカイブへ送る）が払い終わってから出す。
@@ -1483,6 +1531,10 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
     if (w) setWinner(w)
   }, [state])
   const closeWinner = useCallback(() => setWinner(null), [])
+  useEffect(() => {
+    if (winner) playSound(!versus || winner === 'me' ? 'win' : 'lose')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [winner])
   // 再戦（対戦ルームだけ）：両方のカードを戻して、デッキ選択から、準備をやり直す。相手の画面も、デッキ選択に戻る
   const handleRematch = () => {
     if (!versus) return
@@ -1623,7 +1675,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
 
   // ゾーンの中身の一覧に出す、カード1枚分（手札／ホルダー／ステージ／アーカイブ）
   const renderViewerCard = (pc: PlayCard) => (
-    <div key={pc.uid} className="flex flex-col gap-1" onMouseEnter={() => setPreview(pc.card)}>
+    <div key={pc.uid} className="flex flex-col gap-1">
       {/* カードをタップ（クリック）すると、詳細を大きく表示する（裏向きのカードも、中身を確認できる） */}
       <button
         type="button"
@@ -1867,6 +1919,19 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
       {/* ドローステップ：デッキを中央に出して、クリックで1枚引く（ターンを進める側の画面だけ） */}
       {canAct && turn.phase === 'draw' && <DrawStepOverlay count={state[zoneId(stepSide, 'deck')].length} title={`${stepSide === 'me' ? myDisplayName : oppDisplayName}のドローステップ`} onDraw={handleDrawStep} onSkip={() => advancePhase('yell')} />}
       <SupportCastOverlay queue={castQueue} onDone={handleCastDone} />
+      {chipInput && (() => {
+        const cards = state[chipInput.zone]
+        const top = unitParts(cards).top
+        const baseHp = top ? hpOf(top.card) : null
+        return (
+          <ChipDialog
+            key={`${chipInput.zone}:${chipInput.chip}`}
+            info={{ chip: chipInput.chip, cardName: top?.card.card_name ?? '', damage: unitDamage(cards), power: unitPower(cards), hpUp: unitHpUp(cards), remain: baseHp === null ? null : Math.max(0, baseHp + unitHpUp(cards) - unitDamage(cards)) }}
+            onSubmit={submitChip}
+            onCancel={() => setChipInput(null)}
+          />
+        )
+      })()}
       {artFrom && menuTop && (
         <ArtPickModal
           anchorZone={artFrom}
@@ -2083,10 +2148,10 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
             title={
               isTouch
                 ? 'カードを長押しして動かすとドラッグ（短くタップすると選択）。下の操作バーの「移動」から、移動先を選ぶこともできます。デッキをタップするとメニュー、ライフ・アーカイブなどは中身を確認できます'
-                : 'ドラッグで移動（ブルーム・サポート・エールも連動。デッキの上半分＝デッキトップ、下半分＝一番下）／ ダブルクリックでレスト ／ 右クリックで裏返し ／ デッキをクリックでメニュー（シャッフル・ドロー）・ダブルクリックで中身を見る ／ エールとサポートは、ドラッグで別のカードへ移動（サポートは、クリックで大きく表示） ／ ダメージ・パワーアップのカウンターは、置き場からホロメンへドラッグ ／ ライフ・アーカイブなどをクリックで中身を確認'
+                : 'ドラッグで移動（ブルーム・サポート・エールも連動。デッキの上半分＝デッキトップ、下半分＝デッキアンダー）／ クリックでカードの詳細 ／ ダブルクリック・右クリックで、おやすみ⇄アクティブ ／ デッキをクリックでメニュー（シャッフル・ドロー）・ダブルクリックで中身を見る ／ エールとサポートは、ドラッグで別のカードへ移動（サポートは、クリックで大きく表示） ／ チップ（ダメージ・回復・最大HP・パワーアップ・クリア）は、クリックしてホロメンを選ぶか、ホロメンへドラッグして、数値を入力 ／ ライフ・アーカイブなどをクリックで中身を確認'
             }
           >
-            {isTouch ? '長押ししてドラッグで移動・タップで選ぶ' : 'ドラッグで移動・ダブルクリックでレスト・右クリックで裏返し'}
+            {isTouch ? '長押ししてドラッグで移動・タップで選ぶ' : 'ドラッグで移動・クリックで詳細・右クリックで、おやすみ⇄アクティブ'}
           </p>
             </>
           )}
@@ -2148,7 +2213,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
         <div className="xl:sticky xl:top-2 xl:self-start xl:h-[calc(100dvh-110px)] min-w-0">
           <DamageCounterStrip
             compact={isTouch}
-            hint={isTouch ? '長押ししてホロメンへドラッグ（タップすると、つけ先を、ステージで選べます）' : 'ホロメンへドラッグ。クリックすると、つけ先を、ステージで選べます'}
+            hint={isTouch ? 'チップを長押ししてホロメンへドラッグ（タップすると、つけ先を、ステージで選べます）。そのあと、数値を入力します' : 'チップをクリックして、ホロメンを選ぶ（ドラッグでも）。そのあと、数値を入力します'}
             pending={pendingChip}
             onDragStart={setDrag}
             onDragEnd={clearDrag}
@@ -2156,6 +2221,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
             onTap={handleCounterTap}
             onRoll={(n) => {
               setMessage(`サイコロ：${n}`)
+              pushLog([{ side: 'me', kind: 'dice', text: `サイコロの目：${n}` }]) // プレイログに、サイコロの結果を残す
               versus?.onEmit({ kind: 'dice', n })
             }}
             jankenMine={jankenMine}
@@ -2165,9 +2231,6 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
               setLogOpen((o) => !o)
             } : undefined}
             logOpen={logOpen}
-            acceptRemove={(drag?.kind === 'damage' || drag?.kind === 'power' || drag?.kind === 'hp') && !!drag.from}
-            removeOver={(overZone as string | null) === DAMAGE_STRIP}
-            onDropRemove={() => handleDropZone(DAMAGE_STRIP as ZoneId)}
           />
         </div>
 
@@ -2180,7 +2243,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
           {/* カードのプレビュー（大きな画像と、固有スキル・アーツの効果）と、選んでいるカードの操作 */}
           <section className="hud-panel p-3">
             <h3 className="hud-font text-white text-sm font-bold mb-2">カードのプレビュー</h3>
-            {preview ? <CardPreview card={preview} imageWidth={isTouch ? 150 : 210} /> : <p className="text-xs text-[#9fc3ca]">{isTouch ? 'カードをタップすると、ここに大きく表示します' : 'カードにマウスを乗せると、ここに大きく表示します'}</p>}
+            {preview ? <CardPreview card={preview} imageWidth={isTouch ? 150 : 210} /> : <p className="text-xs text-[#9fc3ca]">{isTouch ? 'カードをタップすると、ここに大きく表示します' : 'カードをクリックすると、ここに大きく表示します'}</p>}
 
             {!isTouch && selected && selectedUnit && (
               <div className="mt-3 pt-3 border-t border-[#143844]">
@@ -2191,7 +2254,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
                   {[...selectedUnit.cards].reverse().map((c) => {
                     const role = isYellCard(c.card) ? 'エール' : isSupportCard(c.card) ? 'サポート' : selectedUnit.parts.holomen[0]?.uid === c.uid ? 'ホロメン' : 'ブルーム'
                     return (
-                      <li key={c.uid} className="flex items-center gap-2 text-xs text-[#d7eef2]" onMouseEnter={() => setPreview(c.card)}>
+                      <li key={c.uid} className="flex cursor-pointer items-center gap-2 text-xs text-[#d7eef2]" onClick={() => setPreview(c.card)}>
                         <Thumb card={c.card} w={26} />
                         <span className="hud-mono text-[10px] text-[#9fc3ca] w-14 shrink-0">{role}</span>
                         <span className="min-w-0 flex-1 truncate">{c.card.card_name}</span>
@@ -2327,7 +2390,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
           <section
             data-pf-zone="holder"
             onDragOver={(e) => {
-              if (drag === null || drag.kind === 'damage' || drag.kind === 'power' || drag.kind === 'hp') return
+              if (drag === null || drag.kind === 'chip') return
               e.preventDefault()
               if (overZone !== 'holder') setOverZone('holder')
             }}
@@ -2399,7 +2462,6 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
                           onTouchStart={(e) => touchDrag.begin(e, { kind: 'card', uid: g.uids[0]! }, cardGhost(g.card))}
                           onContextMenu={(e) => e.preventDefault()}
                           onClick={() => handleSelect(isSel ? null : g.uids[0]!)}
-                          onMouseEnter={() => setPreview(g.card)}
                           title={`${g.card.card_name}（${g.uids.length}枚）`}
                           className={isTouch ? 'relative' : 'relative cursor-grab'}
                           style={{ outline: isSel ? '3px solid #ffd76a' : `1px solid ${HOLDER_COLOR}55`, outlineOffset: 1, borderRadius: 4, userSelect: 'none', WebkitTouchCallout: 'none' }}
@@ -2467,7 +2529,6 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
                     setState((s) => addNewCard(s, c, 'holder'))
                     setPreview(c)
                   }}
-                  onMouseEnter={() => setPreview(c)}
                   title={`${c.card_name}（${c.set_code} ${c.type}）`}
                   className="cursor-pointer"
                   style={{ userSelect: 'none', WebkitTouchCallout: 'none' }}
@@ -2656,8 +2717,8 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
                       key={pc.uid}
                       type="button"
                       className="flex flex-col gap-1 text-left rounded border border-transparent hover:border-[#4ce0e6] p-0.5"
-                      onMouseEnter={() => setPreview(pc.card)}
                       onClick={() => {
+                        setPreview(pc.card)
                         setState((s) => moveCard(s, pc.uid, picker.slot))
                         if (picker.mode === 'bloom') setPicker(null) // ブルームは1枚ずつ。サポート・エールは、続けて選べるよう、開いたままにする
                       }}

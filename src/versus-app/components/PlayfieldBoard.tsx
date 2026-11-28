@@ -1,6 +1,7 @@
 // このファイルは、管理画面（horoka-admin）から、同期したコピーです。直接は、直さないでください（node scripts/sync-versus.mjs で、上書きされます）。直すときは、管理画面側のファイルを直して、同期してください。
 import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { CSSProperties, DragEvent, TouchEvent as ReactTouchEvent } from 'react'
+import { createPortal } from 'react-dom'
 import type { DeckCard } from '../utils/deckImage'
 import type { GhostSpec } from '../hooks/useTouchDrag'
 import { backStyleOf } from '../utils/cardBack'
@@ -8,8 +9,10 @@ import { setScaledDragImage } from '../utils/dragImage'
 import { ATTRIBUTE_COLORS, COLORLESS, parseAttribute } from '../utils/attribute'
 import { HALF_GAP, HALF_H, HALF_W, LOG_FRAME_H, LOG_LABEL_H, LOG_PAD, LOG_W, LOG_X, MAT_H, SIDE_PANEL_W, SIDE_PANEL_X, ZONES, skillCost, handRowLayout, ZONE_BY_KEY, findCard, slotBlocked, parseZone, archiveSplit, isDamageableZone, unitDamage, unitHpUp, unitPower, unitParts, zoneId, PHASE_LABEL, type BloomStage, type PlayCard, type PlayState, type Side, type TurnState, type ZoneDef, type ZoneId, type ZoneKey } from '../utils/playfield'
 
-// ドラッグ中のもの。card: 1枚のカード／unit: 枠の中身全体（ブルーム・サポート・エールごと）／search: 検索結果（新しいカード）／damage: ダメージカウンター
-export type PlayDrag = { kind: 'card'; uid: string } | { kind: 'unit'; zone: ZoneId } | { kind: 'search'; card: DeckCard } | { kind: 'damage'; amount: number; from?: ZoneId } | { kind: 'power'; amount: number; from?: ZoneId } | { kind: 'hp'; amount: number; from?: ZoneId } | null
+// チップの種類（ダメージ・回復・最大HPアップ・パワーアップ・クリア）。数値は、つけ先を選んだあとに、打ち込む
+export type ChipKind = 'damage' | 'heal' | 'hp' | 'power' | 'clear'
+// ドラッグ中のもの。card: 1枚のカード／unit: 枠の中身全体（ブルーム・サポート・エールごと）／search: 検索結果（新しいカード）／chip: チップ（ホロメンへドラッグすると、数値の入力が開く）
+export type PlayDrag = { kind: 'card'; uid: string } | { kind: 'unit'; zone: ZoneId } | { kind: 'search'; card: DeckCard } | { kind: 'chip'; chip: ChipKind } | null
 export type DragItem = NonNullable<PlayDrag>
 
 // 「どの枠をクリック（タップ）するか」を選ばせるモード（エールをつけるホロメンを選ぶ・アーツを使うセンターを選ぶ・ダメージを与える相手を選ぶ）。
@@ -79,12 +82,9 @@ const TURN_BAR_V: CSSProperties = {
   background: 'linear-gradient(180deg, #e6fdff, #4ce0e6 14%, rgba(76,224,230,0.55) 50%, #4ce0e6 86%, #e6fdff)',
 }
 const FIELD_EXT = 38 // 盤面の枠（背景・光）を、ステージの名前（Center・Collabo）の上まで広げる高さ
-export const DAMAGE_STRIP = 'damage-strip' // ダメージカウンター置き場（カードに乗ったカウンターを、ここへドラッグすると外れる）
-
 export function dropAllowed(drag: PlayDrag, zone: ZoneId, state: PlayState): boolean {
   if (drag === null) return false
-  if ((zone as string) === DAMAGE_STRIP) return (drag.kind === 'damage' || drag.kind === 'power' || drag.kind === 'hp') && !!drag.from
-  if (drag.kind === 'damage' || drag.kind === 'power' || drag.kind === 'hp') return isDamageableZone(state, zone)
+  if (drag.kind === 'chip') return isDamageableZone(state, zone)
   // バックとコラボは、合わせて5枚まで：5枚になったら、空いている枠には、新しく置けない（枠どうしの移動は、置ける）
   const from: ZoneId | null = drag.kind === 'card' ? (findCard(state, drag.uid)?.zone ?? null) : drag.kind === 'unit' ? drag.zone : null
   if (slotBlocked(state, zone, from)) return false
@@ -224,7 +224,7 @@ type CardViewProps = {
   dropZone?: { zone: ZoneId; index: number } // タッチでのドロップ先として、探せるようにする（手札の並べ替え）
 }
 
-// 盤面の上の、カード1枚。ドラッグで移動、ダブルクリックでレスト、右クリックで裏返し、クリックで選択
+// 盤面の上の、カード1枚。ドラッグで移動、ダブルクリック・右クリックでレスト（おやすみ）⇄アクティブ、クリックで選択・詳細の表示
 function CardView({ pc, w, h, selected, draggable, fit, style, p, onClickOverride, onDoubleClickOverride, dragItem, onDropOnCard, dropZone, backKey, backCount, backRotate }: CardViewProps) {
   const lastTap = useRef(0) // タッチ：直前にタップした時刻（ダブルタップの判定）
   // レスト（90度回転）したとき、枠に収まるように縮小する
@@ -251,6 +251,7 @@ function CardView({ pc, w, h, selected, draggable, fit, style, p, onClickOverrid
       onDrop={onDropOnCard}
       onClick={(e) => {
         e.stopPropagation()
+        if (!pc.faceDown) p.onPreview(pc.card) // カードの詳細は、クリックしたカードに切り替わる（マウスを乗せるだけでは、変わらない）
         // タッチ：すぐ続けて2回タップ（ダブルタップ）すると、レスト／レスト解除
         if (touch && !onClickOverride && !onDoubleClickOverride) {
           const now = Date.now()
@@ -272,13 +273,10 @@ function CardView({ pc, w, h, selected, draggable, fit, style, p, onClickOverrid
       }}
       onContextMenu={(e) => {
         e.preventDefault()
-        if (!touch) p.onFlip(pc.uid) // 長押しで裏返ってしまわないよう、タッチでは、右クリック相当の操作を無効にする
+        // 右クリックで、レスト（おやすみ）／アクティブを切り替える（裏返しは、選択中のカードの操作から）。長押しで切り替わってしまわないよう、タッチでは無効。山札・アーカイブなど、クリックで開く場所も対象外
+        if (!touch && !onClickOverride) p.onToggleRest(pc.uid)
       }}
-      onMouseEnter={() => {
-        if (touch) return // タッチでは、選んだときに handleSelect がプレビューを更新する
-        if (!pc.faceDown) p.onPreview(pc.card)
-      }}
-      title={pc.faceDown ? '裏向き（右クリックで表向き）' : `${pc.card.card_name}（ダブルクリック／ダブルタップでレスト、右クリックで裏返し）`}
+      title={pc.faceDown ? '裏向き' : `${pc.card.card_name}（クリックで詳細・ダブルクリック／ダブルタップ／右クリックで、おやすみ⇄アクティブ）`}
       style={{
         width: w,
         height: h,
@@ -378,7 +376,7 @@ function YellIcon({ pc, size, left, z, p }: { pc: PlayCard; size: number; left: 
   const item: DragItem = { kind: 'card', uid: pc.uid }
   return (
     <span
-      title={`エール: ${card.card_name}${card.attribute ? `（${card.attribute}）` : ''}（ドラッグで移動）`}
+      title={`エール: ${card.card_name}${card.attribute ? `（${card.attribute}）` : ''}（クリックで詳細・ドラッグで移動）`}
       draggable={!p.touchMode}
       onDragStart={(e) => {
         e.stopPropagation()
@@ -390,8 +388,10 @@ function YellIcon({ pc, size, left, z, p }: { pc: PlayCard; size: number; left: 
       onTouchStart={(e) => {
         if (!p.moveMode) p.onTouchDragStart(e, item, { w: 46, h: 46, round: true, color: hexes[0], text: '' })
       }}
-      onClick={(e) => e.stopPropagation()}
-      onMouseEnter={() => p.onPreview(card)}
+      onClick={(e) => {
+        e.stopPropagation()
+        p.onPreview(card) // クリックで、このエールの詳細を表示する
+      }}
       onContextMenu={(e) => e.preventDefault()}
       style={{
         position: 'absolute',
@@ -422,11 +422,70 @@ function Badge({ n }: { n: number }) {
   )
 }
 
+// 手札のカードを、拡大して表示する（カーソルを合わせたとき。クリックは通す）
+function HandZoom({ card, rect }: { card: DeckCard; rect: DOMRect }) {
+  const w = 280
+  const h = Math.round((w * 88) / 63)
+  const left = Math.max(8, Math.min(rect.left + rect.width / 2 - w / 2, window.innerWidth - w - 8))
+  const top = Math.max(8, Math.min(rect.top - h - 10, window.innerHeight - h - 8))
+  return createPortal(
+    <div aria-hidden="true" style={{ position: 'fixed', left, top, width: w, zIndex: 80, pointerEvents: 'none', borderRadius: 14, overflow: 'hidden', border: '3px solid #ffd76a', background: '#0b1220', boxShadow: '0 10px 30px rgba(0,0,0,0.8)' }}>
+      {card.image_url ? <img src={card.image_url} alt="" draggable={false} style={{ width: '100%', display: 'block' }} /> : <div style={{ padding: 20, color: '#fff', fontSize: 20, fontWeight: 700 }}>{card.card_name}</div>}
+    </div>,
+    document.body
+  )
+}
+
+// デッキにカードを戻すときの案内：デッキの右横に、上半分＝デッキトップ、下半分＝デッキアンダーを出す。いま、カードが乗っている側を強調する
+function DeckReturnHelper({ rect, active }: { rect: DOMRect; active: DropPos | null }) {
+  const half = rect.height / 2
+  const item = (pos: DropPos, label: string, sub: string) => {
+    const on = active === pos
+    return (
+      <div
+        key={pos}
+        style={{
+          position: 'fixed',
+          left: Math.min(rect.right + 8, window.innerWidth - 150),
+          top: rect.top + (pos === 'top' ? 0 : half),
+          height: half,
+          width: 142,
+          zIndex: 80,
+          pointerEvents: 'none',
+          boxSizing: 'border-box',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          padding: '0 10px',
+          borderRadius: 10,
+          border: `2px solid ${on ? '#4ce0e6' : 'rgba(76,224,230,0.4)'}`,
+          background: on ? 'rgba(6,18,23,0.97)' : 'rgba(6,18,23,0.8)',
+          color: on ? '#fff' : '#9fc3ca',
+          boxShadow: on ? '0 0 16px rgba(76,224,230,0.7)' : 'none',
+          fontWeight: 800,
+          lineHeight: 1.25,
+        }}
+      >
+        <span style={{ fontSize: 13 }}>{pos === 'top' ? '↑ ' : '↓ '}{label}</span>
+        <span style={{ fontSize: 10, fontWeight: 600, color: '#9fc3ca' }}>{sub}</span>
+      </div>
+    )
+  }
+  return createPortal(
+    <>
+      {item('top', 'デッキトップ', '一番上に戻す')}
+      {item('bottom', 'デッキアンダー', '一番下に戻す')}
+    </>,
+    document.body
+  )
+}
+
 // ---- ゾーン1つ ----
 function ZoneView({ def, side, p }: { def: ZoneDef; side: Side; p: BoardProps }) {
   const zoneRef = useRef<HTMLDivElement>(null)
   const supRef = useRef<HTMLDivElement>(null)
   const [openSup, setOpenSup] = useState<string | null>(null) // クリックして大きく表示している、サポートのカード
+  const [handZoom, setHandZoom] = useState<{ card: DeckCard; rect: DOMRect } | null>(null) // 手札のカードに、カーソルを合わせて、拡大表示している
   const id = zoneId(side, def.key)
 
   // 表示しているサポートは、ほかの場所を押すと閉じる
@@ -720,7 +779,16 @@ function ZoneView({ def, side, p }: { def: ZoneDef; side: Side; p: BoardProps })
     const cw = Math.round((ch * 63) / 88)
     const step = cards.length > 1 ? Math.min(cw + 10, (w - cw - 20) / (cards.length - 1)) : 0
     return cards.map((pc, i) => (
-      <div key={pc.uid} style={{ position: 'absolute', left: 10 + i * step, top: 4, zIndex: i }}>
+      <div
+        key={pc.uid}
+        style={{ position: 'absolute', left: 10 + i * step, top: 4, zIndex: i }}
+        onMouseEnter={(e) => {
+          // カーソルを合わせると、そのカードを大きく表示する（相手の、公開されていないカードは、出さない）
+          if (p.touchMode || pc.faceDown || (concealed && !pc.revealed)) return
+          setHandZoom({ card: pc.card, rect: e.currentTarget.getBoundingClientRect() })
+        }}
+        onMouseLeave={() => setHandZoom(null)}
+      >
         <CardView
           pc={concealed ? (pc.revealed ? { ...pc, faceDown: false } : { ...pc, faceDown: true }) : pc}
           w={cw}
@@ -1018,12 +1086,16 @@ function ZoneView({ def, side, p }: { def: ZoneDef; side: Side; p: BoardProps })
                   textShadow: '0 1px 4px rgba(0,0,0,0.95)',
                 }}
               >
-                {pos === 'top' ? 'デッキトップ' : '一番下'}
+                {pos === 'top' ? 'デッキトップ' : 'デッキアンダー'}
               </div>
             )
           })}
         {def.kind === 'life' && cards.length > 0 && <Badge n={cards.length} />}
       </div>
+      {/* デッキにカードを戻すとき：デッキの右横に、どこへ入るかの案内を出す（画面の上半分＝デッキトップ、下半分＝デッキアンダー）。盤面の外にはみ出ても見えるよう、画面に直接出す */}
+      {isDeck && over && zoneRef.current && <DeckReturnHelper rect={zoneRef.current.getBoundingClientRect()} active={p.overPos} />}
+      {/* 手札のカードを、カーソルを合わせて、拡大表示（カードの上に、大きく出す） */}
+      {handZoom && !p.drag && <HandZoom card={handZoom.card} rect={handZoom.rect} />}
       {def.labelBelow && (
         // 名前は、カードの上に、小さく出す（相手側は、盤面ごと反対向きになる）
         <span style={{ position: 'absolute', left: def.x, top: def.y - 32, width: def.w, textAlign: 'center', fontWeight: 800, fontSize: 26, lineHeight: 1.1, color: def.color, textShadow: '0 1px 3px rgba(0,0,0,0.9)', pointerEvents: 'none' }}>

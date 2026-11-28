@@ -5,7 +5,7 @@ import { ZONE_BY_KEY, isYellCard, parseZone, unitDamage, unitHpUp, unitParts, un
 // ===== プレイログ：盤面が変わったときに、前の盤面との差から、何が起きたかを、文にする =====
 // 自分の操作も、相手の操作（対戦中は、ルームから届く盤面）も、同じ差分から作るので、どちらの画面にも、同じログが出る
 
-export type PlayLogKind = 'move' | 'reveal' | 'rest' | 'damage' | 'power' | 'shuffle' | 'turn' | 'skill' | 'step' | 'attack'
+export type PlayLogKind = 'move' | 'reveal' | 'rest' | 'damage' | 'power' | 'shuffle' | 'turn' | 'skill' | 'step' | 'attack' | 'dice'
 // 枠の色分け：パワー関係（ホロパワー・パワーアップ）＝紫、エール関係＝水色、ダメージ関係＝赤、シャッフル＝青
 export type PlayLogTone = 'power' | 'yell' | 'damage' | 'shuffle'
 // ログの文字の右側に出す、そのログのカード（小さな画像）

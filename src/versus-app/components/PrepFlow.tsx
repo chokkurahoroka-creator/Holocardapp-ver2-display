@@ -87,9 +87,15 @@ const Card = ({ step, title, children }: { step: string; title: string; children
   </div>
 )
 
-const Waiting = ({ text, sub, room }: { text: string; sub?: string; room: { roomCode: string; shareUrl: string; onLeave: () => void } }) => (
+const Waiting = ({ text, sub, badge, room }: { text: string; sub?: string; badge?: string; room: { roomCode: string; shareUrl: string; onLeave: () => void } }) => (
   <Backdrop label={text} room={room}>
     <div className="text-center">
+      {badge && (
+        <p key={badge} className="mb-3 inline-block rounded-full border-2 border-[#ffd76a] bg-[#ffd76a]/15 px-4 py-1 text-base font-extrabold text-[#ffd76a]" style={{ animation: 'prep-mull-pop 0.5s ease-out' }}>
+          <style>{`@keyframes prep-mull-pop{0%{transform:scale(.6);opacity:0}60%{transform:scale(1.15);opacity:1}100%{transform:scale(1)}}@media (prefers-reduced-motion: reduce){p[style*="prep-mull-pop"]{animation:none!important}}`}</style>
+          {badge}
+        </p>
+      )}
       <p className="text-3xl font-extrabold text-white sm:text-4xl" style={{ textShadow: '0 0 18px #4ce0e6' }}>
         {text}
       </p>
@@ -172,7 +178,20 @@ export function PrepFlow(p: PrepFlowProps) {
   }
 
   // ---- 4・5 先攻・後攻の準備 ----
-  if (who !== 'me') return <Waiting room={room} text={`${firstLabel(who ?? 'opp') === '先攻' ? '先攻' : '後攻'}プレイヤー準備中`} />
+  if (who !== 'me') {
+    // 相手が準備しているあいだ：相手の操作（手札を引く・マリガン）の様子を、手札の中身は伏せて、回数だけ見せる
+    const oppTimes = prep.mulligan.opp
+    const oppDrawn = prep.drawn.opp
+    const sub = !oppDrawn ? '手札を引いています…' : oppTimes > 0 ? `マリガン ${oppTimes}回目（手札を引き直しました）` : '手札を確認しています…'
+    return (
+      <Waiting
+        room={room}
+        text={`${firstLabel(who ?? 'opp') === '先攻' ? '先攻' : '後攻'}プレイヤー準備中`}
+        sub={sub}
+        badge={oppTimes > 0 ? `マリガン ×${oppTimes}` : undefined}
+      />
+    )
+  }
 
   const drawn = prep.drawn.me
   const times = prep.mulligan.me

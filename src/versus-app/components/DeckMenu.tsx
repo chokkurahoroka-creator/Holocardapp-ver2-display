@@ -104,7 +104,7 @@ export function DeckMenu({ anchor, title, side, kind, deckCount, returnCount, on
             ))}
           </div>
         )}
-        <button type="button" role="menuitem" disabled={deckCount < 2} onClick={() => onAction('shuffle')} className={`w-full text-left px-4 ${itemClass}`} style={{ minHeight: ITEM_H }}>
+        <button type="button" role="menuitem" disabled={deckCount < 2} onClick={() => onAction('shuffle')} className={`w-full text-center px-4 ${itemClass}`} style={{ minHeight: ITEM_H }}>
           シャッフル
         </button>
         {kind === 'yellDeck' ? (
@@ -113,7 +113,7 @@ export function DeckMenu({ anchor, title, side, kind, deckCount, returnCount, on
             role="menuitem"
             disabled={returnCount < 1 && deckCount < 1}
             onClick={() => onAction('returnYells')}
-            className={`w-full text-left px-4 ${itemClass} border-y border-[#143844] my-1`}
+            className={`w-full text-center px-4 ${itemClass} border-y border-[#143844] my-1`}
             style={{ minHeight: ITEM_H + 6 }}
             title="全てのエールを、エールデッキに戻して、シャッフルしたあと、推しホロメンのライフ分を、ライフに置きます"
           >
@@ -139,7 +139,7 @@ export function DeckMenu({ anchor, title, side, kind, deckCount, returnCount, on
         </div>
         )}
         {kind === 'deck' && (
-          <button type="button" role="menuitem" disabled={returnCount < 1} onClick={() => onAction('returnAll')} className={`w-full text-left px-4 ${itemClass}`} style={{ minHeight: ITEM_H }} title="手札・アーカイブ・ステージのカードを、デッキへ戻します（エールデッキは、そのまま）">
+          <button type="button" role="menuitem" disabled={returnCount < 1} onClick={() => onAction('returnAll')} className={`w-full text-center px-4 ${itemClass}`} style={{ minHeight: ITEM_H }} title="手札・アーカイブ・ステージのカードを、デッキへ戻します（エールデッキは、そのまま）">
             全てデッキに戻す
           </button>
         )}

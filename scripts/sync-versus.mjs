@@ -60,6 +60,7 @@ const FILES = [
   'utils/playLog.ts',
   'utils/playfield.ts',
   'utils/roles.ts',
+  'utils/sound.ts',
   'utils/victory.ts',
   'versus-main.tsx',
   'versus/VersusApp.tsx',
