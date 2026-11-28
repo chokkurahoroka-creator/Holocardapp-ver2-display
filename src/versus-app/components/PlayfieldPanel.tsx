@@ -95,7 +95,7 @@ import { PlayfieldBoard, type BoardProps, type ChipKind, type OshiSkill, dropAll
 import { CardPreview } from './CardPreview'
 import { CardEffects } from './CardEffects'
 import { DeckMenu, type DeckMenuAction } from './DeckMenu'
-import { CHIP_INFO, ChipDialog, DamageCounterStrip, type ChipSubmit } from './DamageCounterStrip'
+import { CHIP_INFO, ChipButton, ChipDialog, CounterRow, DamageCounterStrip, SoundControl, type ChipSubmit } from './DamageCounterStrip'
 import { PlayLogPanel } from './PlayLogPanel'
 import { VictoryModal } from './VictoryModal'
 import { TurnChangeBanner } from './TurnChangeBanner'
@@ -1559,11 +1559,13 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
   type Banner = { id: number; side: Side; label: string; title: string; sub: string; fast: boolean; step: boolean }
   const [bannerQueue, setBannerQueue] = useState<Banner[]>([])
   const bannerPrev = useRef(turn)
+  const [bannerSeen, setBannerSeen] = useState(turn) // 帯を出すかどうかの判断が済んだ、いちばん新しいターンの状態（ドローの表示は、帯のあとにするため）
   const bannerSeq = useRef(0)
   const STEP_BANNER: Record<TurnPhase, [string, string]> = { reset: ['RESET STEP', 'リセットステップ'], draw: ['DRAW STEP', 'ドローステップ'], yell: ['YELL STEP', 'エールステップ'], main: ['MAIN STEP', 'メインステップ'], performance: ['PERFORMANCE STEP', 'パフォーマンスステップ'] }
   useEffect(() => {
     const prev = bannerPrev.current
     bannerPrev.current = turn
+    setBannerSeen(turn)
     if (prev === turn) return
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
     const who = turn.active === 'me' ? myDisplayName : oppDisplayName
@@ -1587,6 +1589,26 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [turn, myDisplayName, oppDisplayName])
   const closeTurnBanner = useCallback(() => setBannerQueue((q) => q.slice(1)), [])
+  // ターンが終わったとき（ターンを進める側が替わったとき）：公開中のカード・推しスキルを、リセットする（SP推しスキルは、1ゲームに1回なので、リセットしない）。
+  //   対戦中は、自分の分だけ（相手の分は、相手の画面で、同じように行われる）。1人用は、両方の分
+  const endResetPrev = useRef(turn)
+  useEffect(() => {
+    const prev = endResetPrev.current
+    endResetPrev.current = turn
+    if (prev === turn) return
+    const ended = prev.active !== turn.active && turn.me + turn.opp - (prev.me + prev.opp) === 1
+    if (!ended) return
+    const mine: Side[] = versus ? ['me'] : ['me', 'opp']
+    const base = stateRef.current
+    const hidden = mine.reduce((acc, sd) => hideRevealed(acc, sd), base)
+    if (hidden !== base) setState(hidden)
+    const side = prev.active // ターンを終えた側
+    // SP推しスキルは、1ゲームに1回なので、自動ではリセットしない（推しスキルだけ、リセットする）
+    if (mine.includes(side) && skillRef.current[`${side}:oshi`]) {
+      setSkillUsed((m) => ({ ...m, [`${side}:oshi`]: false }))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [turn])
   const turnBanner = bannerQueue[0] ?? null
 
   // 盤面（PlayfieldBoard）へ渡す処理。盤面は、データが変わったときだけ描き直す（メモ化）ので、渡す関数は変わらないものにして、
@@ -1884,6 +1906,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
             <span className={`inline-block h-2 w-2 rounded-full ${versus.waiting ? 'bg-[#9fc3ca]' : versus.peerOnline ? 'bg-[#4ade80]' : 'bg-[#f87171]'}`} />
             {versus.waiting ? '相手の入室待ち' : `${versus.oppName}（${versus.peerOnline ? 'オンライン' : '切断中'}）`}
           </span>
+          <SoundControl compact={isTouch} />
           <button
             type="button"
             className="text-[#ff8a8a]"
@@ -1914,10 +1937,17 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
           >
             デッキ選択 <span aria-hidden="true">{deckPanelOpen ? '▲' : '▼'}</span>
           </button>
+          <SoundControl compact pill />
+        </div>
+      )}
+      {/* 1人用（ルームなし）のPC画面：トップメニューが無いので、効果音のボタンだけを、左上に出す */}
+      {!versus && !isTouch && !message && (
+        <div className="fixed left-2 z-[72] flex items-center rounded-lg border border-[#4ce0e6]/60 bg-[#061217]/90 px-2 py-1 text-[11px] shadow-lg" style={{ top: 'calc(8px + env(safe-area-inset-top, 0px))' }}>
+          <SoundControl />
         </div>
       )}
       {/* ドローステップ：デッキを中央に出して、クリックで1枚引く（ターンを進める側の画面だけ） */}
-      {canAct && turn.phase === 'draw' && <DrawStepOverlay count={state[zoneId(stepSide, 'deck')].length} title={`${stepSide === 'me' ? myDisplayName : oppDisplayName}のドローステップ`} onDraw={handleDrawStep} onSkip={() => advancePhase('yell')} />}
+      {canAct && turn.phase === 'draw' && bannerSeen === turn && bannerQueue.length === 0 && <DrawStepOverlay count={state[zoneId(stepSide, 'deck')].length} title={`${stepSide === 'me' ? myDisplayName : oppDisplayName}のドローステップ`} onDraw={handleDrawStep} onSkip={() => advancePhase('yell')} />}
       <SupportCastOverlay queue={castQueue} onDone={handleCastDone} />
       {chipInput && (() => {
         const cards = state[chipInput.zone]
@@ -2546,7 +2576,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
       {/* スマホ（タッチ操作）：選んでいるカードの操作バー。画面の下に固定して、盤面から離れずに操作できるようにする */}
       {isTouch && selected && (
         <>
-          <div style={{ height: effectsOpen ? 'calc(24vh + 290px)' : 260 }} aria-hidden="true" />
+          <div style={{ height: effectsOpen ? 'calc(30vh + 300px)' : 'calc(44vh + 130px)' }} aria-hidden="true" />
           {/* ボタンは、画面の下端から離して置く（下すぎると、誤って押しやすいため） */}
           <div className="fixed inset-x-0 bottom-0 z-[75] border-t-2 border-[#4ce0e6] bg-[#061217]/97 px-2 pt-2" style={{ paddingBottom: 'calc(44px + env(safe-area-inset-bottom, 0px))', boxShadow: '0 -6px 20px rgba(0,0,0,0.6)' }}>
             <div className="flex items-start gap-2 mb-1.5">
@@ -2576,76 +2606,62 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
                 <CardEffects card={selectedUnit?.parts.top?.card ?? selected.pc.card} />
               </div>
             )}
-            <div className="flex gap-1.5 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}>
-              <button type="button" className={moveMode ? 'btn-primary shrink-0 whitespace-nowrap' : 'btn-primary shrink-0 whitespace-nowrap'} onClick={() => setMoveMode((v) => !v)} style={{ minHeight: 44 }}>
-                {moveMode ? '移動をやめる' : '移動'}
-              </button>
-              <button type="button" className="btn-secondary shrink-0 whitespace-nowrap" style={{ minHeight: 44 }} onClick={() => toggleRest(selected.pc.uid)}>
-                {(selectedUnit ? selectedUnit.parts.top?.rested : selected.pc.rested) ? 'レスト解除' : 'レスト'}
-              </button>
+            {/* 操作は、チップ（丸い札）にして、スクロールしなくても、全部が一覧で見えるようにする。色は、チップ置き場と同じ（ダメージ：赤／パワー：黄／最大HP：緑） */}
+            <div className="flex flex-col gap-2 overflow-y-auto pb-1" style={{ maxHeight: effectsOpen ? '30vh' : '44vh', WebkitOverflowScrolling: 'touch' }}>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <ChipButton color="#0ea5e9" active={moveMode} onClick={() => setMoveMode((v) => !v)}>
+                  {moveMode ? '移動をやめる' : '移動'}
+                </ChipButton>
+                <ChipButton color="#8b5cf6" active={!!(selectedUnit ? selectedUnit.parts.top?.rested : selected.pc.rested)} onClick={() => toggleRest(selected.pc.uid)}>
+                  {(selectedUnit ? selectedUnit.parts.top?.rested : selected.pc.rested) ? 'レスト解除' : 'レスト'}
+                </ChipButton>
+                {!selectedUnit && (
+                  <ChipButton color="#64748b" onClick={() => flip(selected.pc.uid)}>
+                    {selected.pc.faceDown ? '表向き' : '裏向き'}
+                  </ChipButton>
+                )}
+                {canReveal && (
+                  <ChipButton color="#ffb020" active={selected.pc.revealed} onClick={() => toggleReveal(selected.pc.uid)}>
+                    {selected.pc.revealed ? '公開をやめる' : '公開する'}
+                  </ChipButton>
+                )}
+              </div>
               {selectedDamage && (
-                <>
-                  <button type="button" className="btn-secondary shrink-0 whitespace-nowrap" style={{ minHeight: 44 }} onClick={() => damageUnit(selectedDamage.zone, 10)}>
-                    ダメージ+10
-                  </button>
-                  <button type="button" className="btn-secondary shrink-0 whitespace-nowrap" style={{ minHeight: 44 }} onClick={() => damageUnit(selectedDamage.zone, 50)}>
-                    +50
-                  </button>
-                  <button type="button" className="btn-secondary shrink-0 whitespace-nowrap" style={{ minHeight: 44 }} onClick={() => damageUnit(selectedDamage.zone, -10)} disabled={selectedDamage.dmg === 0}>
-                    −10
-                  </button>
-                  <button type="button" className="btn-secondary shrink-0 whitespace-nowrap" style={{ minHeight: 44 }} onClick={() => setState((st) => clearDamage(st, selectedDamage.zone))} disabled={selectedDamage.dmg === 0}>
-                    ダメージ消去
-                  </button>
-                  <button type="button" className="btn-secondary shrink-0 whitespace-nowrap" style={{ minHeight: 44 }} onClick={() => powerUnit(selectedDamage.zone, 10)}>
-                    パワー+10
-                  </button>
-                  <button type="button" className="btn-secondary shrink-0 whitespace-nowrap" style={{ minHeight: 44 }} onClick={() => powerUnit(selectedDamage.zone, -10)} disabled={selectedDamage.pow === 0}>
-                    パワー−10
-                  </button>
-                  <button type="button" className="btn-secondary shrink-0 whitespace-nowrap" style={{ minHeight: 44 }} onClick={() => hpUpUnit(selectedDamage.zone, 10)}>
-                    最大HP+10
-                  </button>
-                  <button type="button" className="btn-secondary shrink-0 whitespace-nowrap" style={{ minHeight: 44 }} onClick={() => hpUpUnit(selectedDamage.zone, -10)} disabled={selectedDamage.hpUp === 0}>
-                    最大HP−10
-                  </button>
-                </>
-              )}
-              {!selectedUnit && (
-                <button type="button" className="btn-secondary shrink-0 whitespace-nowrap" style={{ minHeight: 44 }} onClick={() => flip(selected.pc.uid)}>
-                  {selected.pc.faceDown ? '表向き' : '裏向き'}
-                </button>
-              )}
-              {canReveal && (
-                <button type="button" className="btn-primary shrink-0 whitespace-nowrap" style={{ minHeight: 44 }} onClick={() => toggleReveal(selected.pc.uid)}>
-                  {selected.pc.revealed ? '公開をやめる' : '公開する'}
-                </button>
+                <div className="flex flex-col gap-1.5">
+                  <CounterRow color="#ef4444" name="ダメージ" value={selectedDamage.dmg} onMinus={() => damageUnit(selectedDamage.zone, -10)} onPlus={() => damageUnit(selectedDamage.zone, 10, undefined, '', true)} onClear={() => setState((st) => clearDamage(st, selectedDamage.zone))} />
+                  <CounterRow color="#f59e0b" name="パワー" prefix="+" value={selectedDamage.pow} onMinus={() => powerUnit(selectedDamage.zone, -10)} onPlus={() => powerUnit(selectedDamage.zone, 10)} />
+                  <CounterRow color="#16a34a" name="最大HP" prefix="+" value={selectedDamage.hpUp} onMinus={() => hpUpUnit(selectedDamage.zone, -10)} onPlus={() => hpUpUnit(selectedDamage.zone, 10)} />
+                </div>
               )}
               {selectedUnit && (
-                <>
-                  <button type="button" className="btn-secondary shrink-0 whitespace-nowrap" style={{ minHeight: 44 }} onClick={() => setPicker({ slot: selectedUnit.zone, mode: 'bloom' })}>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <ChipButton color="#14b8a6" onClick={() => setPicker({ slot: selectedUnit.zone, mode: 'bloom' })}>
                     ブルーム
-                  </button>
-                  <button type="button" className="btn-secondary shrink-0 whitespace-nowrap" style={{ minHeight: 44 }} onClick={() => setPicker({ slot: selectedUnit.zone, mode: 'support' })}>
+                  </ChipButton>
+                  <ChipButton color="#ec4899" onClick={() => setPicker({ slot: selectedUnit.zone, mode: 'support' })}>
                     サポート
-                  </button>
-                  <button type="button" className="btn-secondary shrink-0 whitespace-nowrap" style={{ minHeight: 44 }} onClick={() => setPicker({ slot: selectedUnit.zone, mode: 'yell' })}>
+                  </ChipButton>
+                  <ChipButton color="#38bdf8" onClick={() => setPicker({ slot: selectedUnit.zone, mode: 'yell' })}>
                     エール
-                  </button>
-                  <button type="button" className="btn-secondary shrink-0 whitespace-nowrap" style={{ minHeight: 44 }} onClick={() => setState((st) => attachYellFromDeck(st, selectedSide, selectedUnit.zone))} disabled={state[zoneId(selectedSide, 'yellDeck')].length === 0}>
+                  </ChipButton>
+                  <ChipButton color="#38bdf8" onClick={() => setState((st) => attachYellFromDeck(st, selectedSide, selectedUnit.zone))} disabled={state[zoneId(selectedSide, 'yellDeck')].length === 0}>
                     エールデッキから
-                  </button>
-                </>
+                  </ChipButton>
+                </div>
               )}
-              <button type="button" className="btn-secondary shrink-0 whitespace-nowrap" style={{ minHeight: 44 }} onClick={() => moveSelected(handOfSelected())}>
-                手札へ
-              </button>
-              <button type="button" className="btn-secondary shrink-0 whitespace-nowrap" style={{ minHeight: 44 }} onClick={() => moveSelected(archiveOfSelected())}>
-                アーカイブへ
-              </button>
-              {!versus && (<button type="button" className="btn-secondary shrink-0 whitespace-nowrap" style={{ minHeight: 44 }} onClick={() => moveSelected('holder')}>
-                ホルダーへ
-              </button>)}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <ChipButton color="#475569" onClick={() => moveSelected(handOfSelected())}>
+                  手札へ
+                </ChipButton>
+                <ChipButton color="#475569" onClick={() => moveSelected(archiveOfSelected())}>
+                  アーカイブへ
+                </ChipButton>
+                {!versus && (
+                  <ChipButton color="#475569" onClick={() => moveSelected('holder')}>
+                    ホルダーへ
+                  </ChipButton>
+                )}
+              </div>
             </div>
           </div>
         </>

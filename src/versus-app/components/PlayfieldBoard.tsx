@@ -422,20 +422,6 @@ function Badge({ n }: { n: number }) {
   )
 }
 
-// 手札のカードを、拡大して表示する（カーソルを合わせたとき。クリックは通す）
-function HandZoom({ card, rect }: { card: DeckCard; rect: DOMRect }) {
-  const w = 280
-  const h = Math.round((w * 88) / 63)
-  const left = Math.max(8, Math.min(rect.left + rect.width / 2 - w / 2, window.innerWidth - w - 8))
-  const top = Math.max(8, Math.min(rect.top - h - 10, window.innerHeight - h - 8))
-  return createPortal(
-    <div aria-hidden="true" style={{ position: 'fixed', left, top, width: w, zIndex: 80, pointerEvents: 'none', borderRadius: 14, overflow: 'hidden', border: '3px solid #ffd76a', background: '#0b1220', boxShadow: '0 10px 30px rgba(0,0,0,0.8)' }}>
-      {card.image_url ? <img src={card.image_url} alt="" draggable={false} style={{ width: '100%', display: 'block' }} /> : <div style={{ padding: 20, color: '#fff', fontSize: 20, fontWeight: 700 }}>{card.card_name}</div>}
-    </div>,
-    document.body
-  )
-}
-
 // デッキにカードを戻すときの案内：デッキの右横に、上半分＝デッキトップ、下半分＝デッキアンダーを出す。いま、カードが乗っている側を強調する
 function DeckReturnHelper({ rect, active }: { rect: DOMRect; active: DropPos | null }) {
   const half = rect.height / 2
@@ -485,7 +471,7 @@ function ZoneView({ def, side, p }: { def: ZoneDef; side: Side; p: BoardProps })
   const zoneRef = useRef<HTMLDivElement>(null)
   const supRef = useRef<HTMLDivElement>(null)
   const [openSup, setOpenSup] = useState<string | null>(null) // クリックして大きく表示している、サポートのカード
-  const [handZoom, setHandZoom] = useState<{ card: DeckCard; rect: DOMRect } | null>(null) // 手札のカードに、カーソルを合わせて、拡大表示している
+  const [dockX, setDockX] = useState<number | null>(null) // 手札の上の、カーソルの位置（枠の中の、左からの距離）。MacBookのドックのように、近いカードほど大きくする
   const id = zoneId(side, def.key)
 
   // 表示しているサポートは、ほかの場所を押すと閉じる
@@ -778,16 +764,32 @@ function ZoneView({ def, side, p }: { def: ZoneDef; side: Side; p: BoardProps })
     const ch = h - 14
     const cw = Math.round((ch * 63) / 88)
     const step = cards.length > 1 ? Math.min(cw + 10, (w - cw - 20) / (cards.length - 1)) : 0
-    return cards.map((pc, i) => (
+    // ドック風の拡大：カーソルに近いカードほど、大きくなる（隣のカードは、少し外へ押し広げる）。ドラッグ中・スマホ・相手の伏せた手札は、しない
+    const dock = !p.touchMode && !p.drag && !concealed && dockX !== null ? dockX : null
+    const R = cw * 1.9
+    const MAX = 1.85
+    return cards.map((pc, i) => {
+      const cx = 10 + i * step + cw / 2
+      let sc = 1
+      let dx = 0
+      if (dock !== null) {
+        const t = Math.min(1, Math.abs(dock - cx) / R)
+        sc = 1 + (MAX - 1) * ((1 + Math.cos(Math.PI * t)) / 2)
+        dx = Math.max(-1, Math.min(1, (cx - dock) / cw)) * (sc - 1) * cw * 0.55
+      }
+      return (
       <div
         key={pc.uid}
-        style={{ position: 'absolute', left: 10 + i * step, top: 4, zIndex: i }}
-        onMouseEnter={(e) => {
-          // カーソルを合わせると、そのカードを大きく表示する（相手の、公開されていないカードは、出さない）
-          if (p.touchMode || pc.faceDown || (concealed && !pc.revealed)) return
-          setHandZoom({ card: pc.card, rect: e.currentTarget.getBoundingClientRect() })
+        style={{
+          position: 'absolute',
+          left: 10 + i * step,
+          top: 4,
+          zIndex: i + Math.round((sc - 1) * 300),
+          transform: sc === 1 && dx === 0 ? undefined : `translateX(${dx}px) scale(${sc})`,
+          transformOrigin: 'center bottom',
+          transition: 'transform 90ms ease-out',
+          willChange: dock !== null ? 'transform' : undefined,
         }}
-        onMouseLeave={() => setHandZoom(null)}
       >
         <CardView
           pc={concealed ? (pc.revealed ? { ...pc, faceDown: false } : { ...pc, faceDown: true }) : pc}
@@ -809,7 +811,8 @@ function ZoneView({ def, side, p }: { def: ZoneDef; side: Side; p: BoardProps })
           <span style={{ position: 'absolute', right: 6, top: 6, zIndex: 20, padding: '0 10px', borderRadius: 999, background: '#ffd76a', color: '#3b2a00', fontWeight: 800, fontSize: 22, pointerEvents: 'none', boxShadow: '0 2px 5px rgba(0,0,0,0.6)' }}>公開中</span>
         )}
       </div>
-    ))
+      )
+    })
   })()
 
   const shuffleFx = p.fx.find((f) => f.kind === 'shuffle' && f.zone === id)
@@ -859,6 +862,13 @@ function ZoneView({ def, side, p }: { def: ZoneDef; side: Side; p: BoardProps })
         onDoubleClick={() => {
           if (isDeck || def.key === 'yellDeck') openViewer() // デッキ・エールデッキは、ダブルクリックで中身を見る
         }}
+        onMouseMove={def.kind === 'hand' && !p.touchMode ? (e) => {
+          const el = e.currentTarget
+          const r = el.getBoundingClientRect()
+          const k = r.width / (el.offsetWidth || 1) // 盤面の縮小（拡大）の倍率
+          setDockX((e.clientX - r.left) / k)
+        } : undefined}
+        onMouseLeave={def.kind === 'hand' && !p.touchMode ? () => setDockX(null) : undefined}
         style={{
           position: 'absolute',
           left: def.x,
@@ -1094,8 +1104,6 @@ function ZoneView({ def, side, p }: { def: ZoneDef; side: Side; p: BoardProps })
       </div>
       {/* デッキにカードを戻すとき：デッキの右横に、どこへ入るかの案内を出す（画面の上半分＝デッキトップ、下半分＝デッキアンダー）。盤面の外にはみ出ても見えるよう、画面に直接出す */}
       {isDeck && over && zoneRef.current && <DeckReturnHelper rect={zoneRef.current.getBoundingClientRect()} active={p.overPos} />}
-      {/* 手札のカードを、カーソルを合わせて、拡大表示（カードの上に、大きく出す） */}
-      {handZoom && !p.drag && <HandZoom card={handZoom.card} rect={handZoom.rect} />}
       {def.labelBelow && (
         // 名前は、カードの上に、小さく出す（相手側は、盤面ごと反対向きになる）
         <span style={{ position: 'absolute', left: def.x, top: def.y - 32, width: def.w, textAlign: 'center', fontWeight: 800, fontSize: 26, lineHeight: 1.1, color: def.color, textShadow: '0 1px 3px rgba(0,0,0,0.9)', pointerEvents: 'none' }}>

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties, TouchEvent as ReactTouchEvent } from 'react'
 import { createPortal } from 'react-dom'
 import type { GhostSpec } from '../hooks/useTouchDrag'
+import type { ReactNode } from 'react'
 import { playSound, useSoundSettings } from '../utils/sound'
 import type { ChipKind, DragItem } from './PlayfieldBoard'
 
@@ -135,7 +136,6 @@ export function DamageCounterStrip({ compact, pending, onDragStart, onDragEnd, o
     return () => ro.disconnect()
   }, [compact])
   const size = compact ? fit : 40 // PC：小さくして、場所を取らないようにする
-  const sound = useSoundSettings() // 効果音：ミュート・音量
 
   const token = (chip: ChipKind) => {
     const info = CHIP_INFO[chip]
@@ -279,51 +279,6 @@ export function DamageCounterStrip({ compact, pending, onDragStart, onDragEnd, o
             )}
           </div>
         </div>
-        {/* 効果音：ミュートの切り替えと、音量（スマホは、切り替えだけ） */}
-        <div className={row}>
-          <div className={group}>
-            {tag('SOUND')}
-            <button
-              type="button"
-              onClick={() => {
-                sound.setEnabled(!sound.enabled)
-                if (!sound.enabled) window.setTimeout(() => playSound('chip'), 0) // 入れたときに、試しに1回鳴る
-              }}
-              title={sound.enabled ? '効果音：オン（クリックでミュート）' : '効果音：ミュート中（クリックでオン）'}
-              aria-label="効果音"
-              aria-pressed={sound.enabled}
-              className="grid place-items-center shrink-0 select-none"
-              style={{
-                width: size,
-                height: size,
-                borderRadius: '50%',
-                background: sound.enabled ? 'radial-gradient(circle at 35% 30%, #ffffff 0%, #bff3f6 60%, #4ce0e6 100%)' : 'radial-gradient(circle at 35% 30%, #e5e7eb 0%, #6b7280 100%)',
-                border: '3px solid rgba(255,255,255,0.92)',
-                boxShadow: '0 3px 8px rgba(0,0,0,0.6)',
-                boxSizing: 'border-box',
-                fontSize: Math.round(size * 0.5),
-                lineHeight: 1,
-                padding: 0,
-              }}
-            >
-              {sound.enabled ? '🔊' : '🔇'}
-            </button>
-            {!compact && (
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={Math.round(sound.volume * 100)}
-                onChange={(e) => sound.setVolume(Number(e.target.value) / 100)}
-                onPointerUp={() => playSound('chip')}
-                aria-label="効果音の音量"
-                title={`効果音の音量：${Math.round(sound.volume * 100)}%`}
-                disabled={!sound.enabled}
-                className="w-14 shrink-0 accent-[#4ce0e6] xl:w-full"
-              />
-            )}
-          </div>
-        </div>
       </div>
 
       {!compact && <p className="text-[10px] text-[#9fc3ca] xl:text-center leading-snug min-w-0">{hint}</p>}
@@ -344,7 +299,7 @@ export type ChipSubmit = { amount: number } | { clear: { damage: boolean; power:
 
 export function ChipDialog({ info, onSubmit, onCancel }: { info: ChipDialogInfo; onSubmit: (v: ChipSubmit) => void; onCancel: () => void }) {
   const meta = CHIP_INFO[info.chip]
-  const [text, setText] = useState('')
+  const [text, setText] = useState('10') // 数値は、10ずつ増減する（直接、打ち込んでもよい）
   const [sel, setSel] = useState({ damage: info.damage > 0, power: info.power > 0, hp: info.hpUp > 0 })
   const inputRef = useRef<HTMLInputElement>(null)
   useEffect(() => {
@@ -352,6 +307,7 @@ export function ChipDialog({ info, onSubmit, onCancel }: { info: ChipDialogInfo;
   }, [])
   const amount = Math.floor(Number(text.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))))
   const amountOk = Number.isFinite(amount) && amount > 0
+  const bump = (d: number) => setText(String(Math.max(10, (Number.isFinite(amount) ? amount : 0) + d))) // 10ずつ増減（いちばん小さいのは、10）
   const clearOk = sel.damage || sel.power || sel.hp
   const submit = () => {
     if (info.chip === 'clear') {
@@ -413,25 +369,34 @@ export function ChipDialog({ info, onSubmit, onCancel }: { info: ChipDialogInfo;
         ) : (
           <div className="mb-3">
             {status && <p className="mb-1.5 text-xs text-[#9fc3ca]">{status}</p>}
-            <input
-              ref={inputRef}
-              type="number"
-              inputMode="numeric"
-              min={1}
-              step={10}
-              value={text}
-              placeholder="数値を入力"
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  submit()
-                }
-              }}
-              aria-label={`${meta.name}の数値`}
-              className="w-full rounded-lg border-2 bg-[#0b1f27] px-3 py-2 text-center text-xl font-bold text-white outline-none"
-              style={{ borderColor: meta.color }}
-            />
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => bump(-10)} disabled={!Number.isFinite(amount) || amount <= 10} aria-label="10減らす" className="shrink-0 rounded-full border-2 border-white/80 font-extrabold text-white disabled:opacity-35" style={{ width: 52, height: 52, background: `linear-gradient(180deg, ${meta.color}, ${meta.color}b0)`, fontSize: 15, boxShadow: '0 2px 6px rgba(0,0,0,0.55)' }}>
+                −10
+              </button>
+              <input
+                ref={inputRef}
+                type="number"
+                inputMode="numeric"
+                min={1}
+                step={10}
+                value={text}
+                placeholder="数値"
+                onFocus={(e) => e.currentTarget.select()}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    submit()
+                  }
+                }}
+                aria-label={`${meta.name}の数値`}
+                className="min-w-0 flex-1 rounded-lg border-2 bg-[#0b1f27] px-2 py-2 text-center text-xl font-bold text-white outline-none"
+                style={{ borderColor: meta.color }}
+              />
+              <button type="button" onClick={() => bump(10)} aria-label="10増やす" className="shrink-0 rounded-full border-2 border-white/80 font-extrabold text-white" style={{ width: 52, height: 52, background: `linear-gradient(180deg, ${meta.color}, ${meta.color}b0)`, fontSize: 15, boxShadow: '0 2px 6px rgba(0,0,0,0.55)' }}>
+                +10
+              </button>
+            </div>
           </div>
         )}
 
@@ -446,5 +411,96 @@ export function ChipDialog({ info, onSubmit, onCancel }: { info: ChipDialogInfo;
       </div>
     </div>,
     document.body
+  )
+}
+
+// ===== スマホの、カード操作バーで使う、チップ風のボタン =====
+export function ChipButton({ color, children, onClick, disabled, active, label }: { color: string; children: ReactNode; onClick: () => void; disabled?: boolean; active?: boolean; label?: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      aria-pressed={active}
+      className="shrink-0 select-none whitespace-nowrap font-extrabold text-white"
+      style={{
+        minHeight: 40,
+        minWidth: 52,
+        padding: '0 14px',
+        borderRadius: 999,
+        background: `linear-gradient(180deg, ${color} 0%, ${color}b8 100%)`,
+        border: `2px solid ${active ? '#4ce0e6' : 'rgba(255,255,255,0.85)'}`,
+        boxShadow: active ? '0 0 0 2px #4ce0e6, 0 2px 6px rgba(0,0,0,0.55)' : '0 2px 6px rgba(0,0,0,0.55)',
+        fontSize: 13,
+        textShadow: '0 1px 2px rgba(0,0,0,0.75)',
+        opacity: disabled ? 0.35 : 1,
+      }}
+    >
+      {children}
+    </button>
+  )
+}
+
+// ダメージ・パワー・最大HPの、1行分：名前と、いまの数値の札、そして、増減のチップ（10ずつ）
+export function CounterRow({ color, name, value, prefix, onMinus, onPlus, onClear }: { color: string; name: string; value: number; prefix?: string; onMinus: () => void; onPlus: () => void; onClear?: () => void }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className="flex shrink-0 items-center justify-between gap-2 rounded-full px-3" style={{ minWidth: 112, minHeight: 40, background: `${color}26`, border: `2px solid ${color}` }}>
+        <span className="text-[11px] font-bold text-[#d7eef2]">{name}</span>
+        <span className="hud-mono text-sm font-extrabold text-white">
+          {prefix ?? ''}
+          {value}
+        </span>
+      </div>
+      <ChipButton color={color} onClick={onMinus} disabled={value === 0} label={`${name}を10減らす`}>
+        −10
+      </ChipButton>
+      <ChipButton color={color} onClick={onPlus} label={`${name}を10増やす`}>
+        +10
+      </ChipButton>
+      {onClear && (
+        <ChipButton color="#64748b" onClick={onClear} disabled={value === 0} label={`${name}をクリア`}>
+          クリア
+        </ChipButton>
+      )}
+    </div>
+  )
+}
+
+// ===== 効果音のボタン（トップメニュー用） =====
+export function SoundControl({ compact, pill }: { compact?: boolean; pill?: boolean }) {
+  const sound = useSoundSettings()
+  const toggle = () => {
+    sound.setEnabled(!sound.enabled)
+    if (!sound.enabled) window.setTimeout(() => playSound('chip'), 0) // 入れたときに、試しに1回鳴る
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <button
+        type="button"
+        onClick={toggle}
+        aria-pressed={sound.enabled}
+        aria-label="効果音"
+        title={sound.enabled ? '効果音：オン（クリックでミュート）' : '効果音：ミュート中（クリックでオン）'}
+        className={pill ? 'inline-flex items-center gap-1 rounded-full border border-[#4ce0e6]/60 bg-[#061217]/90 px-2.5 py-1.5 text-[11px] font-bold text-[#d7eef2] shadow-lg' : 'inline-flex items-center gap-1 text-[#d7eef2]'}
+      >
+        <span aria-hidden="true">{sound.enabled ? '🔊' : '🔇'}</span>
+        {!compact && <span>{sound.enabled ? '効果音' : 'ミュート中'}</span>}
+      </button>
+      {!compact && sound.enabled && (
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={Math.round(sound.volume * 100)}
+          onChange={(e) => sound.setVolume(Number(e.target.value) / 100)}
+          onPointerUp={() => playSound('chip')}
+          aria-label="効果音の音量"
+          title={`効果音の音量：${Math.round(sound.volume * 100)}%`}
+          className="w-16 accent-[#4ce0e6]"
+        />
+      )}
+    </span>
   )
 }
