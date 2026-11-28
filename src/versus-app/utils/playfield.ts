@@ -807,6 +807,35 @@ export function detectHits(prev: PlayState, next: PlayState): HitEvent[] {
   return out
 }
 
+// ===== エールが、ホロメンについたことを見つける（盤面の変化から。自分の操作も、相手の操作も、同じように見つかる） =====
+// 山札・手札・アーカイブなど、ステージの外から来たエール、または、別のホロメンから移ってきたエールを数える（ホロメンごと、ステージの別の枠へ移ったときは、数えない）
+export type YellAttachEvent = { zone: ZoneId; cards: DeckCard[] }
+export function detectYellAttaches(prev: PlayState, next: PlayState): YellAttachEvent[] {
+  const out: YellAttachEvent[] = []
+  const where = new Map<string, ZoneId>() // 前の盤面で、そのカードが、どの枠にあったか
+  for (const id of Object.keys(prev) as ZoneId[]) for (const c of prev[id]) where.set(c.uid, id)
+  for (const side of ['me', 'opp'] as const) {
+    for (const k of STAGE_ZONE_KEYS) {
+      const id = zoneId(side, k)
+      if (prev[id] === next[id]) continue
+      const added: DeckCard[] = []
+      for (const y of unitParts(next[id]).yells) {
+        const from = where.get(y.uid)
+        if (from === id) continue
+        if (from && STAGE_ZONE_KEYS.some((sk) => zoneId(side, sk) === from)) {
+          // ステージの別の枠から来た：ホロメンごと動いたのなら、エールがついたわけではない
+          const before = unitParts(prev[from]).top
+          const after = unitParts(next[id]).top
+          if (before && after && before.uid === after.uid) continue
+        }
+        added.push(y.card)
+      }
+      if (added.length > 0) out.push({ zone: id, cards: added })
+    }
+  }
+  return out
+}
+
 // ===== 対戦の準備（ターンが始まる前） =====
 // デッキをセット → じゃんけん → 勝った人が、先攻・後攻を決める → 先攻が準備（7枚引く・マリガン・ホロメンをセット）→ 準備完了
 // → 後攻が準備 → 準備完了 → 先攻から、ターンが始まる。保存は、ホスト向き（me ＝ ホスト）。ゲストの画面に出すときは、自分と相手を入れ替える

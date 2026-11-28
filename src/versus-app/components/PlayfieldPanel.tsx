@@ -33,6 +33,7 @@ import {
   calcArtDamage,
   drawToHandHolder,
   detectHits,
+  detectYellAttaches,
   emptyBackZones,
   mulliganDrawCount,
   mulliganHand,
@@ -556,8 +557,9 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
   const moveTargets = versus ? MOVE_TARGETS.filter((t) => t.id !== 'holder') : MOVE_TARGETS // 対戦中は、自分だけのホルダー（共有されない）は使わない
   // ms：演出を、盤面に出しておく時間。ブルームの演出は、相手の画面へは送らない（それぞれの画面で、盤面の変化から出す）
   const pushFx = (fx: PlayFxInput, emit = true, ms = 1300) => {
-    if (emit && fx.kind !== 'bloom' && fx.kind !== 'hit') versus?.onEmit({ kind: 'fx', fx })
-    playSound(fx.kind === 'shuffle' ? 'shuffle' : fx.kind === 'down' ? 'down' : fx.kind === 'fly' ? 'fly' : fx.kind === 'bloom' ? 'bloom' : fx.kind === 'attack' ? 'attack' : 'hit') // 効果音（相手が起こした演出も、同じように鳴る）
+    if (emit && fx.kind !== 'bloom' && fx.kind !== 'hit' && fx.kind !== 'yell') versus?.onEmit({ kind: 'fx', fx })
+    // エールが、ホロメンへ飛ぶときは、ついたときの音（yell）を鳴らすので、飛ぶ音は鳴らさない
+    if (!(fx.kind === 'fly' && isDamageableZone(stateRef.current, fx.to))) playSound(fx.kind === 'shuffle' ? 'shuffle' : fx.kind === 'down' ? 'down' : fx.kind === 'fly' ? 'fly' : fx.kind === 'yell' ? 'yell' : fx.kind === 'bloom' ? 'bloom' : fx.kind === 'attack' ? 'attack' : 'hit') // 効果音（相手が起こした演出も、同じように鳴る）
     const id = ++fxSeq.current
     setFxList((l) => [...l, { ...fx, id }])
     window.setTimeout(() => setFxList((l) => l.filter((f) => f.id !== id)), ms)
@@ -599,7 +601,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
     setState(r.state)
     if (r.defeated) {
       const side = parseZone(zone)?.side ?? 'me'
-      pushFx({ kind: 'down', from: zone, to: zoneId(side, 'archive'), card: r.defeated.card })
+      pushFx({ kind: 'down', from: zone, to: zoneId(side, 'archive'), card: r.defeated.card, amount: delta }) // ダウンさせたダメージも、アニメーションに出す
       if (selectedUnit?.zone === zone) handleSelect(null)
       if (lifeLoss) {
         const lost = loseLifeToHolder(r.state, side)
@@ -1284,6 +1286,7 @@ export function PlayfieldPanel({ versus }: { versus?: VersusSync } = {}) {
     if (casts.length > 0) setCastQueue((q) => [...q, ...casts.map((c) => ({ id: ++castSeq.current, card: c.card, who: versus ? (c.side === 'me' ? 'あなた' : '相手') : c.side === 'me' ? '自分' : '相手' }))])
     for (const b of detectBlooms(prev, state)) pushFx({ kind: 'bloom', zone: b.zone, stage: b.stage, label: b.label }, false, 1900)
     for (const h of detectHits(prev, state)) pushFx({ kind: 'hit', zone: h.zone, amount: h.amount }, false, 1100)
+    for (const y of detectYellAttaches(prev, state)) pushFx({ kind: 'yell', zone: y.zone, cards: y.cards }, false, 1300) // エールがついた：光と音（どの操作でついても、相手がつけても、出る）
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state])
   const handleCastDone = useCallback((id: number) => setCastQueue((q) => q.filter((c) => c.id !== id)), [])

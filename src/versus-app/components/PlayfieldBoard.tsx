@@ -20,7 +20,7 @@ export type DragItem = NonNullable<PlayDrag>
 export type PickState = { zones: ZoneId[]; color: string; weak?: ZoneId[] } // weak：光らないが、クリックはできる枠（エールが足りないアーツを、確認のうえで使うホロメン）
 
 // アニメーション。shuffle: そのゾーンのカードをシャッフルする動き／down: ダメージで倒されたホロメンが、アーカイブへ飛んでいく動き
-export type PlayFxInput = { kind: 'shuffle'; zone: ZoneId } | { kind: 'down' | 'fly'; from: ZoneId; to: ZoneId; card: DeckCard } | { kind: 'bloom'; zone: ZoneId; stage: BloomStage; label: string } | { kind: 'attack'; from: ZoneId; to: ZoneId; amount: number; art?: string; parts?: string } | { kind: 'hit'; zone: ZoneId; amount: number } // attack：アーツの攻撃（矢印とダメージが、攻撃する枠から、相手の枠へ飛ぶ。相手の画面にも送る）／hit：ダメージを受けた枠の、演出（盤面の変化から、それぞれの画面で出す）／ bloom：ブルームした枠の、演出（相手の画面へは送らない。それぞれの画面で、盤面の変化から出す） // fly：カードが、1枚、別のゾーンへ飛んでいく（ホロパワーのアーカイブなど）
+export type PlayFxInput = { kind: 'shuffle'; zone: ZoneId } | { kind: 'down' | 'fly'; from: ZoneId; to: ZoneId; card: DeckCard; amount?: number } | { kind: 'yell'; zone: ZoneId; cards: DeckCard[] } | { kind: 'bloom'; zone: ZoneId; stage: BloomStage; label: string } | { kind: 'attack'; from: ZoneId; to: ZoneId; amount: number; art?: string; parts?: string } | { kind: 'hit'; zone: ZoneId; amount: number } // yell：エールが、ホロメンについた枠の、演出（盤面の変化から、それぞれの画面で出す）／ down の amount：ダウンさせたダメージ（アニメーションに、数字を出す）／ attack：アーツの攻撃（矢印とダメージが、攻撃する枠から、相手の枠へ飛ぶ。相手の画面にも送る）／hit：ダメージを受けた枠の、演出（盤面の変化から、それぞれの画面で出す）／ bloom：ブルームした枠の、演出（相手の画面へは送らない。それぞれの画面で、盤面の変化から出す） // fly：カードが、1枚、別のゾーンへ飛んでいく（ホロパワーのアーカイブなど）
 export type PlayFx = PlayFxInput & { id: number }
 
 const FX_CSS = `
@@ -46,6 +46,10 @@ const FX_CSS = `
 @keyframes pf-hit-shake{0%,100%{transform:translate(0,0)}15%{transform:translate(-14px,6px)}30%{transform:translate(12px,-6px)}45%{transform:translate(-10px,4px)}60%{transform:translate(8px,-4px)}75%{transform:translate(-4px,2px)}}
 @keyframes pf-hit-num{0%{transform:translateY(24px) scale(.4);opacity:0}18%{transform:translateY(0) scale(1.25);opacity:1}60%{transform:translateY(-8px) scale(1);opacity:1}100%{transform:translateY(-70px) scale(1);opacity:0}}
 @keyframes pf-hit-ring{0%{transform:scale(.4);opacity:.95}100%{transform:scale(1.35);opacity:0}}
+@keyframes pf-yell-glow{0%{opacity:0}18%{opacity:.85}100%{opacity:0}}
+@keyframes pf-yell-ring{0%{transform:scale(.55);opacity:.95}100%{transform:scale(1.3);opacity:0}}
+@keyframes pf-yell-orb{0%{transform:translate(var(--ox),var(--oy)) scale(.5);opacity:0}30%{opacity:1}100%{transform:translate(0,0) scale(1.1);opacity:0}}
+@keyframes pf-yell-text{0%{transform:translateY(12px) scale(.6);opacity:0}22%{transform:translateY(0) scale(1.15);opacity:1}70%{transform:translateY(-6px) scale(1);opacity:1}100%{transform:translateY(-22px) scale(1);opacity:0}}
 @keyframes pf-down-flash{0%{opacity:0}12%{opacity:.75}100%{opacity:0}}
 @keyframes pf-down-text{0%{transform:scale(.4);opacity:0}15%{transform:scale(1.25);opacity:1}55%{transform:scale(1);opacity:1}100%{transform:translateY(-24px) scale(1);opacity:0}}
 @media (prefers-reduced-motion: reduce){.pf-fx{display:none!important}}
@@ -822,6 +826,7 @@ function ZoneView({ def, side, p }: { def: ZoneDef; side: Side; p: BoardProps })
   const flyFxs = p.fx.filter((f) => f.kind === 'fly' && f.from === id)
   const bloomFx = p.fx.find((f) => f.kind === 'bloom' && f.zone === id)
   const hitFx = p.fx.find((f) => f.kind === 'hit' && f.zone === id)
+  const yellFx = p.fx.find((f) => f.kind === 'yell' && f.zone === id)
   return (
     <>
       <div
@@ -1042,6 +1047,46 @@ function ZoneView({ def, side, p }: { def: ZoneDef; side: Side; p: BoardProps })
             </div>
           )
         })()}
+        {/* エールがついたときの演出：エールの色の光が、広がって、きらきらが集まる */}
+        {yellFx && yellFx.kind === 'yell' && (() => {
+          const hexes = yellFx.cards.flatMap((c) => yellColors(c))
+          const main = hexes[0] ?? '#4ce0e6'
+          const orbs = Array.from({ length: 8 }, (_, i) => ({ a: (i / 8) * Math.PI * 2, c: hexes[i % Math.max(1, hexes.length)] ?? main }))
+          return (
+            <div key={yellFx.id} className="pf-fx" style={{ position: 'absolute', inset: 0, zIndex: 42, pointerEvents: 'none' }}>
+              <div style={{ position: 'absolute', inset: 0, borderRadius: 12, background: `radial-gradient(circle, rgba(255,255,255,0.85), ${main}99 45%, rgba(0,0,0,0) 72%)`, animation: 'pf-yell-glow 0.9s ease-out forwards', opacity: 0 }} />
+              <div style={{ position: 'absolute', inset: 0, borderRadius: 14, border: `7px solid ${main}`, boxShadow: `0 0 26px ${main}`, opacity: 0, animation: 'pf-yell-ring 0.8s ease-out forwards' }} />
+              {orbs.map((o, i) => (
+                <span
+                  key={i}
+                  style={
+                    {
+                      position: 'absolute',
+                      left: '50%',
+                      top: '50%',
+                      width: 18,
+                      height: 18,
+                      marginLeft: -9,
+                      marginTop: -9,
+                      borderRadius: '50%',
+                      background: `radial-gradient(circle at 35% 30%, #fff, ${o.c})`,
+                      boxShadow: `0 0 12px ${o.c}`,
+                      '--ox': `${Math.cos(o.a) * def.w * 0.55}px`,
+                      '--oy': `${Math.sin(o.a) * def.h * 0.55}px`,
+                      animation: `pf-yell-orb 0.75s ${i * 0.03}s ease-in forwards`,
+                      opacity: 0,
+                    } as CSSProperties
+                  }
+                />
+              ))}
+              <div style={{ position: 'absolute', left: 0, right: 0, bottom: '6%', display: 'flex', justifyContent: 'center', transform: side === 'opp' ? 'rotate(180deg)' : undefined }}>
+                <span style={{ fontSize: Math.min(40, def.w * 0.2), fontWeight: 900, color: '#fff', WebkitTextStroke: `2px ${main}`, textShadow: `0 0 12px ${main}, 0 3px 6px rgba(0,0,0,0.9)`, animation: 'pf-yell-text 1.1s ease-out forwards', opacity: 0, whiteSpace: 'nowrap' }}>
+                  +エール{yellFx.cards.length > 1 ? `×${yellFx.cards.length}` : ''}
+                </span>
+              </div>
+            </div>
+          )
+        })()}
         {/* ダウンのアニメーション：赤く光って震え、アーカイブへ飛んでいく */}
         {downFx && downFx.kind === 'down' && downDef && (
           <div key={downFx.id} className="pf-fx" style={{ position: 'absolute', inset: 0, zIndex: 40, pointerEvents: 'none' }}>
@@ -1064,6 +1109,12 @@ function ZoneView({ def, side, p }: { def: ZoneDef; side: Side; p: BoardProps })
               )}
             </div>
             <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 58, fontWeight: 900, color: '#fff', letterSpacing: 2, textShadow: '0 0 12px #ef4444, 0 3px 6px rgba(0,0,0,0.9)', animation: 'pf-down-text 1s ease-out forwards' }}>DOWN</div>
+            {/* ダウンさせたときも、ダメージの数字を出す（ダウンしなかったときと同じ、赤い数字） */}
+            {downFx.amount !== undefined && downFx.amount > 0 && (
+              <div style={{ position: 'absolute', left: 0, right: 0, top: '4%', display: 'flex', justifyContent: 'center', transform: side === 'opp' ? 'rotate(180deg)' : undefined }}>
+                <span style={{ fontSize: Math.min(92, def.w * 0.34), fontWeight: 900, color: '#fff', WebkitTextStroke: '3px #b91c1c', textShadow: '0 0 14px #ef4444, 0 4px 8px rgba(0,0,0,0.9)', animation: 'pf-hit-num 1s ease-out forwards', opacity: 0 }}>-{downFx.amount}</span>
+              </div>
+            )}
           </div>
         )}
         {/* デッキにドラッグしているあいだ：上半分＝デッキトップ、下半分＝デッキの一番下（相手側は、盤面ごと回転しているので、画面の上下に合わせる） */}

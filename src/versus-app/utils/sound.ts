@@ -12,6 +12,7 @@ export type SoundName =
   | 'reveal' // カードの公開
   | 'shuffle' // シャッフル
   | 'fly' // エール・ホロパワーが飛ぶ
+  | 'yell' // エールが、ホロメンについた
   | 'chip' // チップを選んだ
   | 'power' // パワーアップなどのカウンターが変わった
   | 'attack' // アーツの攻撃
@@ -83,20 +84,74 @@ function audio(): AudioContext | null {
     master = ctx.createGain()
     master.gain.value = settings.volume
     master.connect(ctx.destination)
+    ctx.onstatechange = () => {
+      if (ctx && ctx.state !== 'running') arm() // 端末の都合で止められたら、次のタップで、取り直す
+    }
   }
   if (ctx.state === 'suspended') void ctx.resume().catch(() => undefined)
   return ctx
 }
 
-// 最初のクリック・タップで、音を出せる状態にする（ブラウザの決まり）
-if (typeof window !== 'undefined') {
-  const unlock = () => {
-    audio()
-    window.removeEventListener('pointerdown', unlock, true)
-    window.removeEventListener('keydown', unlock, true)
+// スマホ（特にiPhone）は、「画面に触れた瞬間」ではなく、「指を離した（タップが終わった）」操作の中でないと、音を出す許可が出ない。
+// そのため、タップ・クリック・キー入力のたびに、音を出せる状態かを確かめて、まだなら、その操作の中で、許可を取る（許可が取れるまで、繰り返す）
+const GESTURES = ['touchend', 'pointerup', 'click', 'keydown'] as const
+let armed = false
+let silentTag: HTMLAudioElement | null = null
+// 1秒だけの、無音のWAV（iPhoneのマナーモードでも、音が出るようにする補助に使う）
+const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA='
+
+function unlock() {
+  const c = audio()
+  if (!c) return
+  try {
+    // iOS 17以降：サイレントスイッチがオンでも、音を出す設定にする
+    const nav = navigator as Navigator & { audioSession?: { type: string } }
+    if (nav.audioSession) nav.audioSession.type = 'playback'
+  } catch {
+    /* 対応していない端末は、そのまま */
   }
-  window.addEventListener('pointerdown', unlock, true)
-  window.addEventListener('keydown', unlock, true)
+  try {
+    // 無音を、1回鳴らして、音を出せる状態にする（この、ユーザー操作の中で行う必要がある）
+    const src = c.createBufferSource()
+    src.buffer = c.createBuffer(1, 1, 22050)
+    src.connect(c.destination)
+    src.start(0)
+  } catch {
+    /* 鳴らせなくても、続ける */
+  }
+  if (!silentTag) {
+    try {
+      silentTag = new Audio(SILENT_WAV) // 古いiPhone：audio要素を一度鳴らすと、マナーモードでも、Web Audioの音が出る
+      silentTag.setAttribute('playsinline', '')
+      void silentTag.play().catch(() => undefined)
+    } catch {
+      /* 使えない環境は、そのまま */
+    }
+  }
+  void c
+    .resume()
+    .then(() => {
+      if (c.state === 'running') disarm()
+    })
+    .catch(() => undefined)
+  if (c.state === 'running') disarm()
+}
+function arm() {
+  if (armed || typeof window === 'undefined') return
+  armed = true
+  for (const g of GESTURES) window.addEventListener(g, unlock, { capture: true, passive: true })
+}
+function disarm() {
+  if (!armed || typeof window === 'undefined') return
+  armed = false
+  for (const g of GESTURES) window.removeEventListener(g, unlock, { capture: true })
+}
+if (typeof window !== 'undefined') {
+  arm()
+  // アプリを切り替えて戻ってきたときなど、音が止まってしまったら、また、次のタップで、許可を取り直す
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && ctx && ctx.state !== 'running') arm()
+  })
 }
 
 // ---- 音の部品 ----
@@ -156,6 +211,13 @@ const RECIPES: Record<SoundName, (c: AudioContext, t: number) => void> = {
   fly: (c, t) => {
     noise(c, t, 0.22, 0.16, 'bandpass', 700, 2400, 1.4)
     tone(c, t + 0.12, 700, 0.1, 'sine', 0.12, 1000)
+  },
+  yell: (c, t) => {
+    // ぽん、と弾んで、きらきらと広がる
+    tone(c, t, 520, 0.12, 'sine', 0.22, 1040)
+    tone(c, t + 0.08, 1320, 0.22, 'triangle', 0.14)
+    tone(c, t + 0.15, 1760, 0.26, 'sine', 0.1)
+    noise(c, t + 0.05, 0.3, 0.05, 'highpass', 6000)
   },
   chip: (c, t) => {
     tone(c, t, 880, 0.05, 'sine', 0.16)
@@ -222,7 +284,7 @@ const RECIPES: Record<SoundName, (c: AudioContext, t: number) => void> = {
 }
 
 // 同じ音が、連続で鳴りすぎないよう、間隔をあける（盤面を一度に読み込んだときなど）
-const MIN_GAP_MS: Partial<Record<SoundName, number>> = { move: 90, rest: 90, reveal: 120, power: 120, hit: 150, fly: 120, shuffle: 400, chip: 60 }
+const MIN_GAP_MS: Partial<Record<SoundName, number>> = { move: 90, rest: 90, reveal: 120, power: 120, hit: 150, fly: 120, yell: 120, shuffle: 400, chip: 60 }
 const lastAt: Partial<Record<SoundName, number>> = {}
 
 export function playSound(name: SoundName): void {
@@ -231,7 +293,11 @@ export function playSound(name: SoundName): void {
   if (now - (lastAt[name] ?? -1e9) < (MIN_GAP_MS[name] ?? 40)) return
   lastAt[name] = now
   const c = audio()
-  if (!c || c.state !== 'running') return // まだ、画面を操作していない（ブラウザが、音を許していない）
+  if (!c) return
+  if (c.state !== 'running') {
+    arm() // まだ、音が許されていない（画面を、タップしていない）：次のタップで、許可を取る
+    return
+  }
   try {
     RECIPES[name](c, c.currentTime + 0.01)
   } catch {
